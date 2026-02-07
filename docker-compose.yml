@@ -1,0 +1,109 @@
+version: '3.9'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    container_name: instagram_bot_postgres
+    environment:
+      POSTGRES_USER: instagram_bot
+      POSTGRES_PASSWORD: secret_password_change_me
+      POSTGRES_DB: instagram_viral
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U instagram_bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - instagram_network
+
+  # Redis Cache & Queue
+  redis:
+    image: redis:7-alpine
+    container_name: instagram_bot_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - instagram_network
+
+  # Telegram Bot
+  bot:
+    build: .
+    container_name: instagram_bot
+    command: python -m app.bot.main
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://instagram_bot:secret_password_change_me@postgres:5432/instagram_viral
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+      - ./app:/app/app
+    networks:
+      - instagram_network
+
+  # Celery Worker
+  celery_worker:
+    build: .
+    container_name: instagram_celery_worker
+    command: celery -A app.workers.celery_app worker --loglevel=info --concurrency=2
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://instagram_bot:secret_password_change_me@postgres:5432/instagram_viral
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+      - postgres
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+      - ./app:/app/app
+    networks:
+      - instagram_network
+
+  # Celery Beat (Scheduler)
+  celery_beat:
+    build: .
+    container_name: instagram_celery_beat
+    command: celery -A app.workers.celery_app beat --loglevel=info
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://instagram_bot:secret_password_change_me@postgres:5432/instagram_viral
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+      - postgres
+    restart: unless-stopped
+    volumes:
+      - ./logs:/app/logs
+      - ./app:/app/app
+    networks:
+      - instagram_network
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  instagram_network:
+    driver: bridge

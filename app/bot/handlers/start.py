@@ -166,4 +166,52 @@ async def cmd_status(message: Message):
 async def callback_show_status(callback: CallbackQuery):
     """Callback для кнопки статуса."""
     await callback.answer()
-    await cmd_status(callback.message)
+    
+    # Проверка админа
+    if callback.from_user.id != config.ADMIN_CHAT_ID:
+        return
+    
+    try:
+        async for session in get_session():
+            # Посты на одобрении
+            pending_result = await session.execute(
+                select(func.count(ProcessedPost.id))
+                .where(ProcessedPost.status == ProcessedStatus.PENDING_APPROVAL)
+            )
+            pending_count = pending_result.scalar() or 0
+            
+            # Одобренные посты
+            approved_result = await session.execute(
+                select(func.count(ProcessedPost.id))
+                .where(ProcessedPost.status == ProcessedStatus.APPROVED)
+            )
+            approved_count = approved_result.scalar() or 0
+            
+            # Опубликованные посты
+            posted_result = await session.execute(
+                select(func.count(ProcessedPost.id))
+                .where(ProcessedPost.status == ProcessedStatus.POSTED)
+            )
+            posted_count = posted_result.scalar() or 0
+            
+            # Отклоненные посты
+            rejected_result = await session.execute(
+                select(func.count(ProcessedPost.id))
+                .where(ProcessedPost.status == ProcessedStatus.REJECTED)
+            )
+            rejected_count = rejected_result.scalar() or 0
+            
+            text = (
+                "📊 *Статус системы*\n\n"
+                f"🔄 Бот работает\n"
+                f"⏳ На одобрении: {pending_count}\n"
+                f"✅ Одобрено: {approved_count}\n"
+                f"📤 Опубликовано: {posted_count}\n"
+                f"❌ Отклонено: {rejected_count}\n"
+            )
+            
+            await callback.message.edit_text(text, parse_mode="Markdown")
+            
+    except Exception as e:
+        logger.error(f"Error showing status: {e}")
+        await callback.message.edit_text("❌ Ошибка при получении статистики")

@@ -84,4 +84,58 @@ async def cmd_history(message: Message):
 async def callback_show_history(callback: CallbackQuery):
     """Callback для кнопки истории."""
     await callback.answer()
-    await cmd_history(callback.message)
+    
+    # Проверка админа
+    if callback.from_user.id != config.ADMIN_CHAT_ID:
+        return
+    
+    try:
+        async for session in get_session():
+            # Получаем последние одобренные/отклоненные посты
+            result = await session.execute(
+                select(ProcessedPost)
+                .where(
+                    ProcessedPost.status.in_([
+                        ProcessedStatus.APPROVED,
+                        ProcessedStatus.REJECTED,
+                        ProcessedStatus.POSTED,
+                    ])
+                )
+                .order_by(desc(ProcessedPost.updated_at))
+                .limit(HISTORY_LIMIT)
+            )
+            posts = result.scalars().all()
+            
+            if not posts:
+                await callback.message.edit_text(
+                    "📜 *История пуста*\n\nНет обработанных постов.",
+                    parse_mode="Markdown"
+                )
+                return
+            
+            # Формируем текст
+            text = f"📜 *История постов*\n\n"
+            text += f"Последние {len(posts)} постов:\n\n"
+            
+            for i, post in enumerate(posts, start=1):
+                # Определяем иконку статуса
+                if post.status == ProcessedStatus.APPROVED:
+                    status_icon = "✅"
+                elif post.status == ProcessedStatus.REJECTED:
+                    status_icon = "❌"
+                elif post.status == ProcessedStatus.POSTED:
+                    status_icon = "📤"
+                else:
+                    status_icon = "❓"
+                
+                text += f"{status_icon} *{i}. {post.title[:40]}...*\n"
+                text += f"   Автор: @{post.original_post.author}\n"
+                text += f"   Лайки: {post.original_post.likes:,}\n"
+                text += f"   Статус: {post.status.value}\n"
+                text += f"   Дата: {post.updated_at.strftime('%d.%m.%Y %H:%M')}\n\n"
+            
+            await callback.message.edit_text(text, parse_mode="Markdown")
+            
+    except Exception as e:
+        logger.error(f"Error showing history: {e}")
+        await callback.message.edit_text("❌ Ошибка при получении истории")

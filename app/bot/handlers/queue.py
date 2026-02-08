@@ -2,11 +2,12 @@ from aiogram import Router, F
 from aiogram.filters import Command
 from aiogram.types import Message, CallbackQuery
 from loguru import logger
+from sqlalchemy import select, func
+from sqlalchemy.orm import selectinload
 
 from app.config import get_config
 from app.models import get_session, ProcessedPost, ProcessedStatus
 from app.bot.keyboards.inline_keyboards import get_main_menu, get_queue_keyboard_with_menu
-from sqlalchemy import select
 
 router = Router(name="queue")
 config = get_config()
@@ -57,13 +58,12 @@ async def show_queue_page(message: Message, page: int = 0, edit: bool = False):
     """
     try:
         async for session in get_session():
-            # Получаем общее количество постов
+            # Получаем общее количество постов (асинхронный count)
             count_result = await session.execute(
-                select(ProcessedPost)
+                select(func.count(ProcessedPost.id))
                 .where(ProcessedPost.status == ProcessedStatus.PENDING_APPROVAL)
             )
-            all_posts = count_result.scalars().all()
-            total_posts = len(all_posts)
+            total_posts = count_result.scalar() or 0
             
             if total_posts == 0:
                 text = "📋 *Очередь пуста*\n\nНет постов, ожидающих одобрения."
@@ -85,8 +85,18 @@ async def show_queue_page(message: Message, page: int = 0, edit: bool = False):
             total_pages = (total_posts + POSTS_PER_PAGE - 1) // POSTS_PER_PAGE
             page = max(0, min(page, total_pages - 1))
             
+            # Загружаем только нужную страницу с eager load original_post
+            # (избегаем lazy load → greenlet_spawn)
+            posts_result = await session.execute(
+                select(ProcessedPost)
+                .options(selectinload(ProcessedPost.original_post))
+                .where(ProcessedPost.status == ProcessedStatus.PENDING_APPROVAL)
+                .order_by(ProcessedPost.created_at.desc())
+                .limit(POSTS_PER_PAGE)
+                .offset(page * POSTS_PER_PAGE)
+            )
+            posts = posts_result.scalars().all()
             offset = page * POSTS_PER_PAGE
-            posts = all_posts[offset:offset + POSTS_PER_PAGE]
             
             # Формируем текст
             text = f"📋 *Очередь на одобрение*\n\n"
@@ -94,12 +104,13 @@ async def show_queue_page(message: Message, page: int = 0, edit: bool = False):
             text += f"Страница {page + 1} из {total_pages}\n\n"
             
             for i, post in enumerate(posts, start=offset + 1):
-                # Получаем оригинальный пост
+                # original_post загружен через selectinload (без lazy load)
                 original = post.original_post
-                
+                author = original.author if original else "?"
+                likes = original.likes if original else 0
                 text += f"*{i}. {post.title[:50]}...*\n"
-                text += f"   Автор: @{original.author}\n"
-                text += f"   Лайки: {original.likes:,}\n"
+                text += f"   Автор: @{author}\n"
+                text += f"   Лайки: {likes:,}\n"
                 text += f"   ID: `{post.id}`\n\n"
             
             keyboard = get_queue_keyboard_with_menu(page, total_pages)

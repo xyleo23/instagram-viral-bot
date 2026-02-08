@@ -38,6 +38,14 @@ class Config(BaseSettings):
         default="anthropic/claude-3.5-sonnet",
         description="AI model for rewriting",
     )
+    OPENROUTER_TEMPERATURE: float = Field(
+        default=0.7,
+        description="Temperature for AI (0.7 — баланс креативности и стабильности)",
+    )
+    OPENROUTER_MAX_TOKENS: int = Field(
+        default=4000,
+        description="Max tokens в ответе OpenRouter",
+    )
 
     ORSHOT_API_KEY: str = Field(
         ..., description="Orshot API Key for image generation"

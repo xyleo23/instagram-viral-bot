@@ -131,7 +131,9 @@ async def process_single_post(self, post_id: int) -> Dict:
         logger.info("Step 1/3: AI rewriting...")
         rewriter = AIRewriter(
             api_key=config.OPENROUTER_API_KEY,
-            model=config.OPENROUTER_MODEL
+            model=config.OPENROUTER_MODEL,
+            temperature=config.OPENROUTER_TEMPERATURE,
+            max_tokens=config.OPENROUTER_MAX_TOKENS,
         )
         
         ai_result = await rewriter.rewrite(

@@ -1,42 +1,93 @@
 """
 Сервис AI рерайта постов через OpenRouter API.
+Стиль: theivansergeev (Иван Сергеев).
 """
 import asyncio
 import json
 import re
 from typing import Dict, List, Optional, Any
-from datetime import datetime
 import aiohttp
 from loguru import logger
 
 from app.config import get_config
 
 
+# Промпт для переписывания в стиле theivansergeev
+REWRITE_PROMPT_TEMPLATE = """
+Ты копирайтер блогера theivansergeev (Иван Сергеев).
+
+Стиль Ивана:
+- Мотивационный, но без токсичного позитива
+- Практичные советы из личного опыта
+- Структурированный контент (списки, шаги)
+- Простой язык, без воды
+- Акцент на действия, а не теорию
+- Эмодзи используются умеренно
+
+Формат вывода - JSON:
+{{
+  "title": "Заголовок поста (до 200 символов)",
+  "caption": "Описание для Instagram (до 2200 символов)",
+  "hashtags": "#бизнес #мотивация #продуктивность",
+  "slides": [
+    "Текст слайда 1 (главная идея)",
+    "Текст слайда 2",
+    ...
+    "Текст слайда 5-10"
+  ]
+}}
+
+Переписать этот пост:
+{original_text}
+"""
+
+# Промпт для разбивки текста на слайды
+SLIDES_PROMPT_TEMPLATE = """
+Разбей текст на 5-10 слайдов для Instagram-карусели. Каждый слайд — одна чёткая мысль, 20-40 слов.
+Стиль: как у theivansergeev — простой язык, без воды, структурированно.
+
+Ответ СТРОГО JSON массив строк:
+["Текст слайда 1", "Текст слайда 2", ...]
+
+Текст:
+{text}
+"""
+
+
 class AIRewriter:
-    """Сервис AI рерайта через OpenRouter API."""
+    """Сервис AI рерайта через OpenRouter API (стиль theivansergeev)."""
     
+    OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
+    DEFAULT_MODEL = "anthropic/claude-3.5-sonnet"
+    DEFAULT_TEMPERATURE = 0.7
+    DEFAULT_MAX_TOKENS = 4000
+
     def __init__(
         self,
         api_key: str,
         model: str = "anthropic/claude-3.5-sonnet",
-        temperature: float = 0.85
+        temperature: float = 0.7,
+        max_tokens: int = 4000,
     ):
         """
         Инициализация AI Rewriter.
         
         Args:
             api_key: OpenRouter API ключ
-            model: Модель AI (claude-3.5-sonnet, gpt-4-turbo, gemini-pro-1.5)
-            temperature: Температура (0-1, выше = более креативно)
+            model: Модель AI (по умолчанию anthropic/claude-3.5-sonnet)
+            temperature: Температура (0.7 — баланс креативности и стабильности)
+            max_tokens: Максимум токенов в ответе
         """
         self.api_key = api_key
         self.model = model
         self.temperature = temperature
-        self.base_url = "https://openrouter.ai/api/v1/chat/completions"
+        self.max_tokens = max_tokens
+        self.base_url = self.OPENROUTER_URL
         
-        # Стоимость моделей (за 1M токенов)
+        # Стоимость моделей (USD за 1M токенов: input / output)
         self.pricing = {
             "anthropic/claude-3.5-sonnet": {"input": 3.0, "output": 15.0},
+            "anthropic/claude-3-haiku": {"input": 0.25, "output": 1.25},
             "openai/gpt-4-turbo": {"input": 10.0, "output": 30.0},
             "google/gemini-pro-1.5": {"input": 1.25, "output": 5.0},
         }
@@ -54,205 +105,263 @@ class AIRewriter:
         """Закрывает HTTP сессию."""
         if self._session and not self._session.closed:
             await self._session.close()
-    
+
+    async def rewrite_post(
+        self,
+        original_text: str,
+        author_context: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Переписывает пост в стиле theivansergeev (Иван Сергеев).
+        
+        Args:
+            original_text: Оригинальный текст поста
+            author_context: Доп. контекст об авторе (например @username или описание)
+        
+        Returns:
+            dict: {
+                "title": str,
+                "caption": str,
+                "hashtags": str,
+                "slides": List[str],
+                "tokens_used": int,
+                "cost_usd": float,
+                "ai_model": str
+            }
+        """
+        prompt = REWRITE_PROMPT_TEMPLATE.format(original_text=original_text.strip())
+        if author_context:
+            prompt = f"Контекст автора: {author_context}\n\n{prompt}"
+
+        logger.info(
+            f"rewrite_post: request model={self.model} prompt_len={len(prompt)} chars"
+        )
+        try:
+            response = await self._call_openrouter(prompt, max_tokens=self.max_tokens)
+            content = response["choices"][0]["message"]["content"]
+            parsed = await self._parse_response(content)
+
+            usage = response.get("usage", {})
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            total_tokens = usage.get("total_tokens", prompt_tokens + completion_tokens)
+            cost_usd = self._calculate_cost(prompt_tokens, completion_tokens)
+
+            logger.info(
+                f"rewrite_post: tokens prompt={prompt_tokens} completion={completion_tokens} "
+                f"total={total_tokens} cost_usd={cost_usd:.4f}"
+            )
+
+            if not self._validate_rewrite_result(parsed):
+                logger.warning("rewrite_post: validation failed, using fallback")
+                parsed = await self._fallback_parse(original_text, slides_count=8)
+
+            parsed["tokens_used"] = total_tokens
+            parsed["cost_usd"] = cost_usd
+            parsed["ai_model"] = self.model
+            return parsed
+
+        except Exception as e:
+            logger.error(f"rewrite_post error: {e}", exc_info=True)
+            return await self._fallback_parse(original_text, slides_count=8)
+
+    async def generate_slides(self, text: str) -> List[str]:
+        """
+        Разбивает текст на слайды для карусели (5-10 слайдов).
+        
+        Args:
+            text: Исходный текст (пост или описание)
+        
+        Returns:
+            Список строк — тексты слайдов
+        """
+        prompt = SLIDES_PROMPT_TEMPLATE.format(text=text.strip())
+        logger.info(f"generate_slides: request model={self.model} text_len={len(text)}")
+        try:
+            response = await self._call_openrouter(
+                prompt, max_tokens=min(self.max_tokens, 2000)
+            )
+            content = response["choices"][0]["message"]["content"]
+            slides = self._parse_slides_response(content)
+
+            usage = response.get("usage", {})
+            total = usage.get("total_tokens", 0)
+            cost = self._calculate_cost(
+                usage.get("prompt_tokens", 0),
+                usage.get("completion_tokens", 0),
+            )
+            logger.info(
+                f"generate_slides: {len(slides)} slides, tokens={total} cost_usd={cost:.4f}"
+            )
+            return slides
+        except Exception as e:
+            logger.error(f"generate_slides error: {e}", exc_info=True)
+            return self._fallback_slides(text)
+
     async def rewrite(
         self,
         text: str,
         author: str,
         slides_count: int = 8,
-        style: str = "viral"
+        style: str = "viral",
     ) -> Dict[str, Any]:
         """
-        Переписывает пост в виральный формат карусели.
+        Переписывает пост в виральный формат карусели (совместимость с processing).
+        Вызывает rewrite_post в стиле theivansergeev.
         
         Args:
             text: Оригинальный текст поста
             author: Автор поста (@username)
-            slides_count: Количество слайдов (обычно 8)
-            style: Стиль переписывания (viral, minimalist, educational)
+            slides_count: Желаемое кол-во слайдов (слайды обрезаются/дополняются при необходимости)
+            style: Игнорируется, используется стиль theivansergeev
         
         Returns:
-            dict: {
-                "title": str,           # Цепляющий заголовок (5-10 слов)
-                "slides": List[str],    # Тексты для слайдов
-                "caption": str,         # Caption для Instagram
-                "hashtags": str,        # Хештеги
-                "tokens_used": int,     # Использовано токенов
-                "cost_usd": float       # Стоимость запроса
-            }
+            dict: title, slides, caption, hashtags, tokens_used, cost_usd, ai_model
         """
-        logger.info(f"Starting AI rewrite for @{author} post ({len(text)} chars)")
-        
+        logger.info(f"rewrite for @{author} ({len(text)} chars)")
+        result = await self.rewrite_post(original_text=text, author_context=author)
+
+        slides = result.get("slides", [])
+        if len(slides) > slides_count:
+            result["slides"] = slides[:slides_count]
+        elif len(slides) < slides_count and slides:
+            while len(result["slides"]) < slides_count:
+                result["slides"].append(slides[-1] if slides else "")
+
+        logger.info(
+            f"rewrite completed: {len(result['slides'])} slides, "
+            f"{result['tokens_used']} tokens, ${result['cost_usd']:.4f}"
+        )
+        return result
+    
+    def _validate_rewrite_result(self, parsed: Dict[str, Any]) -> bool:
+        """Проверяет наличие title, caption, hashtags, slides (5-10 слайдов)."""
+        if not all(k in parsed for k in ("title", "caption", "hashtags", "slides")):
+            return False
+        if not isinstance(parsed.get("slides"), list):
+            return False
+        slides = parsed["slides"]
+        if len(slides) < 1 or len(slides) > 15:
+            return False
+        if any(not (s and str(s).strip()) for s in slides):
+            return False
+        return True
+
+    def _parse_slides_response(self, content: str) -> List[str]:
+        """Парсит из ответа AI JSON-массив строк (слайды)."""
+        content = content.strip()
+        # Убираем markdown code block
+        m = re.search(r"```(?:json)?\s*(\[[\s\S]*?\])\s*```", content)
+        if m:
+            content = m.group(1)
         try:
-            # 1. Построить промпт
-            prompt = self._build_prompt(text, author, slides_count, style)
-            
-            # 2. Отправить запрос в OpenRouter
-            response = await self._call_openrouter(prompt)
-            
-            # 3. Парсить ответ
-            content = response["choices"][0]["message"]["content"]
-            parsed = await self._parse_response(content)
-            
-            # 4. Валидация
-            if not self._validate_result(parsed, slides_count):
-                logger.warning("AI response validation failed, using fallback")
-                parsed = await self._fallback_parse(text, slides_count)
-            
-            # 5. Подсчет стоимости
-            usage = response.get("usage", {})
-            tokens_used = usage.get("total_tokens", 0)
-            cost_usd = self._calculate_cost(
-                usage.get("prompt_tokens", 0),
-                usage.get("completion_tokens", 0)
-            )
-            
-            # 6. Добавление метрик
-            parsed["tokens_used"] = tokens_used
-            parsed["cost_usd"] = cost_usd
-            parsed["ai_model"] = self.model
-            
-            logger.info(
-                f"AI rewrite completed: {len(parsed['slides'])} slides, "
-                f"{tokens_used} tokens, ${cost_usd:.4f}"
-            )
-            
-            return parsed
-            
-        except Exception as e:
-            logger.error(f"Error in AI rewrite: {e}")
-            # Fallback на простой парсинг
-            return await self._fallback_parse(text, slides_count)
-    
-    def _build_prompt(
+            data = json.loads(content)
+        except json.JSONDecodeError:
+            # Попытка найти массив в тексте
+            m = re.search(r"\[[\s\S]*\]", content)
+            if m:
+                try:
+                    data = json.loads(m.group(0))
+                except json.JSONDecodeError:
+                    return []
+            else:
+                return []
+        if isinstance(data, list) and all(isinstance(x, str) for x in data):
+            return [s.strip() for s in data if s and s.strip()]
+        return []
+
+    def _fallback_slides(self, text: str) -> List[str]:
+        """Простая разбивка на слайды по предложениям."""
+        sentences = re.split(r"[.!?]+", text)
+        sentences = [s.strip() for s in sentences if s.strip() and len(s.strip()) > 15]
+        if not sentences:
+            return [text[:200]] if text else []
+        slides = []
+        per_slide = max(1, (len(sentences) + 4) // 5)
+        for i in range(0, len(sentences), per_slide):
+            part = " ".join(sentences[i : i + per_slide])
+            if part:
+                slides.append(part[:300])
+            if len(slides) >= 10:
+                break
+        return slides if slides else [text[:200]]
+
+    async def _call_openrouter(
         self,
-        text: str,
-        author: str,
-        slides_count: int,
-        style: str
-    ) -> str:
+        prompt: str,
+        retry_count: int = 3,
+        max_tokens: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """
-        Строит промпт для AI.
-        
-        Returns:
-            Промпт в формате системного сообщения
-        """
-        system_prompt = f"""Ты эксперт по созданию вирального контента для Instagram в стиле топовых блогеров (@theivansergeev, @sanyaagainst).
-
-Твоя задача: переписать пост в формат КАРУСЕЛИ из {slides_count} слайдов для максимального вовлечения.
-
-СТРУКТУРА:
-
-**Слайд 1** (Заголовок):
-- Цепляющий заголовок 5-10 слов
-- Вызывает любопытство
-- Обещание ценности
-- Примеры: "7 ошибок которые убивают ваш бизнес", "Как я заработал 1M на AI за месяц"
-
-**Слайды 2-{slides_count}** (Содержание):
-- По 20-30 слов на слайд
-- Каждый слайд = одна мысль
-- Простой язык, без воды
-- Конкретика и примеры
-- Эмоциональные триггеры
-
-СТИЛЬ:
-- Как у {author} (изучи его стиль)
-- Минимализм в дизайне
-- Максимум ценности
-- Разговорный тон
-- Короткие предложения
-
-ПРАВИЛА:
-- Сохрани главную мысль оригинала
-- Добавь структуру и логику
-- Убери воду и повторы
-- Добавь эмоции и примеры
-- НЕ копируй текст 1:1
-
-ОТВЕТ СТРОГО В JSON:
-{{
-  "title": "Цепляющий заголовок",
-  "slides": ["Слайд 1 текст", "Слайд 2 текст", ...],
-  "caption": "Основной текст для описания поста в Instagram",
-  "hashtags": "#тег1 #тег2 #тег3"
-}}
-
-ОРИГИНАЛЬНЫЙ ПОСТ:
-{text}
-
-Переписывай!"""
-
-        return system_prompt
-    
-    async def _call_openrouter(self, prompt: str, retry_count: int = 3) -> Dict[str, Any]:
-        """
-        Отправляет запрос в OpenRouter API с retry логикой.
+        Отправляет запрос в OpenRouter API. Логирует запрос и токены.
         
         Args:
-            prompt: Промпт
-            retry_count: Количество попыток
+            prompt: Текст запроса (user message)
+            retry_count: Количество попыток при ошибке
+            max_tokens: Лимит токенов ответа (по умолчанию self.max_tokens)
         
         Returns:
-            Ответ API
+            Ответ API (choices, usage, ...)
         """
         session = await self._get_session()
-        
+        tokens_limit = max_tokens if max_tokens is not None else self.max_tokens
+
         headers = {
             "Authorization": f"Bearer {self.api_key}",
             "Content-Type": "application/json",
-            "HTTP-Referer": "https://github.com/your-repo",  # Опционально
-            "X-Title": "Instagram Viral Bot"
+            "HTTP-Referer": "https://github.com/instagram-bot",
+            "X-Title": "Instagram Bot AI Rewriter",
         }
-        
+
         payload = {
             "model": self.model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
+            "messages": [{"role": "user", "content": prompt}],
             "temperature": self.temperature,
-            "max_tokens": 2000,
-            "top_p": 1,
-            "frequency_penalty": 0.5,
-            "presence_penalty": 0.5
+            "max_tokens": tokens_limit,
         }
-        
+
+        logger.debug(
+            f"OpenRouter request model={self.model} temperature={self.temperature} "
+            f"max_tokens={tokens_limit} prompt_len={len(prompt)}"
+        )
         last_error = None
-        
+
         for attempt in range(retry_count):
             try:
-                logger.debug(f"OpenRouter API call attempt {attempt + 1}/{retry_count}")
-                
                 async with session.post(
-                    self.base_url,
-                    headers=headers,
-                    json=payload
+                    self.base_url, headers=headers, json=payload
                 ) as resp:
-                    resp.raise_for_status()
                     result = await resp.json()
-                    
+                    if resp.status != 200:
+                        err_msg = result.get("error", {}).get("message", resp.reason)
+                        raise aiohttp.ClientResponseError(
+                            resp.request_info,
+                            resp.history,
+                            status=resp.status,
+                            message=err_msg,
+                        )
+                    usage = result.get("usage", {})
                     logger.info(
-                        f"OpenRouter API success: {result.get('usage', {}).get('total_tokens', 0)} tokens"
+                        f"OpenRouter response tokens: prompt={usage.get('prompt_tokens', 0)} "
+                        f"completion={usage.get('completion_tokens', 0)} "
+                        f"total={usage.get('total_tokens', 0)}"
                     )
-                    
                     return result
-                    
-            except aiohttp.ClientError as e:
+            except (aiohttp.ClientError, aiohttp.ClientResponseError) as e:
                 last_error = e
-                logger.warning(f"OpenRouter API error (attempt {attempt + 1}): {e}")
-                
+                logger.warning(
+                    f"OpenRouter attempt {attempt + 1}/{retry_count} failed: {e}"
+                )
                 if attempt < retry_count - 1:
-                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
-                    
+                    await asyncio.sleep(2 ** attempt)
             except Exception as e:
                 last_error = e
-                logger.error(f"Unexpected error in OpenRouter API call: {e}")
+                logger.error(f"OpenRouter unexpected error: {e}", exc_info=True)
                 break
-        
-        raise Exception(f"OpenRouter API failed after {retry_count} attempts: {last_error}")
+
+        raise Exception(
+            f"OpenRouter API failed after {retry_count} attempts: {last_error}"
+        )
     
     async def _parse_response(self, content: str) -> Dict[str, Any]:
         """
@@ -411,42 +520,36 @@ async def main():
     rewriter = AIRewriter(
         api_key=config.OPENROUTER_API_KEY,
         model=config.OPENROUTER_MODEL,
-        temperature=0.85
+        temperature=config.OPENROUTER_TEMPERATURE,
+        max_tokens=config.OPENROUTER_MAX_TOKENS,
     )
-    
-    # Тестовый пост
+
     test_post = """
     Сегодня я хочу поделиться с вами своим опытом запуска успешного онлайн-бизнеса.
-    
     Главное что я понял за 5 лет: успех это не про идеи, а про исполнение.
-    
     У меня было 10 идей которые провалились, и только одна выстрелила.
-    
-    Но эта одна идея изменила всю мою жизнь. Сейчас мой доход 500к+ в месяц.
-    
     Ключ к успеху: начать делать, получать обратную связь, улучшать продукт.
-    
     Не ждите идеального момента. Он никогда не наступит.
     """
-    
+
     try:
-        result = await rewriter.rewrite(
-            text=test_post,
-            author="@testauthor",
-            slides_count=8
+        # Основной метод — переписывание в стиле theivansergeev
+        result = await rewriter.rewrite_post(
+            original_text=test_post,
+            author_context="@theivansergeev",
         )
-        
-        print("\n✅ AI Rewrite completed!\n")
+        print("\n✅ rewrite_post (theivansergeev) completed!\n")
         print(f"📝 Title: {result['title']}")
         print(f"\n📊 Slides ({len(result['slides'])}):")
-        for i, slide in enumerate(result['slides'], 1):
+        for i, slide in enumerate(result["slides"], 1):
             print(f"  {i}. {slide[:80]}...")
-        
         print(f"\n💬 Caption: {result['caption'][:100]}...")
         print(f"🏷️  Hashtags: {result['hashtags']}")
-        print(f"\n💰 Cost: ${result['cost_usd']:.4f}")
-        print(f"🔢 Tokens: {result['tokens_used']}")
-        
+        print(f"\n💰 Cost: ${result['cost_usd']:.4f}  Tokens: {result['tokens_used']}")
+
+        # Отдельно: только разбить текст на слайды
+        slides_only = await rewriter.generate_slides(test_post)
+        print(f"\n✅ generate_slides: {len(slides_only)} slides")
     finally:
         await rewriter.close()
 

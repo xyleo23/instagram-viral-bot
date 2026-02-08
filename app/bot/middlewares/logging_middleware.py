@@ -1,6 +1,6 @@
 from typing import Callable, Dict, Any, Awaitable
 from aiogram import BaseMiddleware
-from aiogram.types import Message, CallbackQuery, Update
+from aiogram.types import Message, CallbackQuery, TelegramObject
 from loguru import logger
 
 
@@ -9,8 +9,8 @@ class LoggingMiddleware(BaseMiddleware):
     
     async def __call__(
         self,
-        handler: Callable[[Update, Dict[str, Any]], Awaitable[Any]],
-        event: Update,
+        handler: Callable[[TelegramObject, Dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
         data: Dict[str, Any]
     ) -> Any:
         """
@@ -25,19 +25,17 @@ class LoggingMiddleware(BaseMiddleware):
             Результат handler'а
         """
         # Логируем сообщения
-        if event.message:
-            msg = event.message
+        if isinstance(event, Message):
             logger.info(
-                f"Message from {msg.from_user.id} (@{msg.from_user.username}): "
-                f"{msg.text or '[media]'}"
+                f"Message from {event.from_user.id} (@{event.from_user.username}): "
+                f"{event.text or event.caption or '[media]'}"
             )
         
         # Логируем callback queries
-        elif event.callback_query:
-            cb = event.callback_query
+        elif isinstance(event, CallbackQuery):
             logger.info(
-                f"Callback from {cb.from_user.id} (@{cb.from_user.username}): "
-                f"{cb.data}"
+                f"Callback from {event.from_user.id} (@{event.from_user.username}): "
+                f"{event.data}"
             )
         
         # Вызываем handler
@@ -47,9 +45,9 @@ class LoggingMiddleware(BaseMiddleware):
             logger.error(f"Error in handler: {e}", exc_info=True)
             
             # Отправляем сообщение об ошибке пользователю
-            if event.message:
-                await event.message.answer("❌ Произошла ошибка. Попробуйте позже.")
-            elif event.callback_query:
-                await event.callback_query.answer("❌ Ошибка", show_alert=True)
+            if isinstance(event, Message):
+                await event.answer("❌ Произошла ошибка. Попробуйте позже.")
+            elif isinstance(event, CallbackQuery):
+                await event.answer("❌ Ошибка", show_alert=True)
             
             raise

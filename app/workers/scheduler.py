@@ -11,7 +11,7 @@ from loguru import logger
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.base import async_session_maker
+from app.models import get_session
 from app.models.processed_post import ProcessedPost
 from app.services.image_generator import ImageGenerator
 from app.services.instagram_publisher import InstagramPublisher
@@ -78,7 +78,7 @@ class PostScheduler:
         now_moscow = datetime.now(MOSCOW_TZ)
         logger.debug(f"Checking scheduled posts at {now_moscow.isoformat()}")
 
-        async with async_session_maker() as session:
+        async for session in get_session():
             stmt = select(ProcessedPost).where(
                 and_(
                     ProcessedPost.publication_status == "SCHEDULED",
@@ -87,6 +87,7 @@ class PostScheduler:
             )
             result = await session.execute(stmt)
             posts = result.scalars().all()
+            break
 
         if not posts:
             return

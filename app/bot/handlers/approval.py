@@ -17,6 +17,7 @@ from app.models import (
     ApprovalHistory, ProcessedStatus, DecisionType, PostStatus
 )
 from app.bot.keyboards.inline import get_approval_keyboard
+from app.bot.keyboards.inline_keyboards import get_main_menu
 from app.bot.states import ApprovalStates
 from sqlalchemy import select
 from datetime import datetime
@@ -253,7 +254,10 @@ async def callback_approve(callback: CallbackQuery, state: FSMContext):
             post = result.scalar_one_or_none()
             
             if not post:
-                await callback.message.edit_text("❌ Пост не найден")
+                await callback.message.edit_text(
+                    "❌ Пост не найден",
+                    reply_markup=get_main_menu()
+                )
                 return
             
             # Обновляем статус
@@ -280,7 +284,8 @@ async def callback_approve(callback: CallbackQuery, state: FSMContext):
             f"Статус: APPROVED\n"
             f"Одобрил: @{callback.from_user.username}\n\n"
             f"Пост готов к публикации.",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=get_main_menu()
         )
         
         logger.info(f"Post {post_id} approved by {callback.from_user.id}")
@@ -309,7 +314,10 @@ async def callback_reject(callback: CallbackQuery, state: FSMContext):
             post = result.scalar_one_or_none()
             
             if not post:
-                await callback.message.edit_text("❌ Пост не найден")
+                await callback.message.edit_text(
+                    "❌ Пост не найден",
+                    reply_markup=get_main_menu()
+                )
                 return
             
             # Обновляем статус
@@ -334,7 +342,8 @@ async def callback_reject(callback: CallbackQuery, state: FSMContext):
             f"ID: {post_id}\n"
             f"Статус: REJECTED\n"
             f"Отклонил: @{callback.from_user.username}",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=get_main_menu()
         )
         
         logger.info(f"Post {post_id} rejected by {callback.from_user.id}")

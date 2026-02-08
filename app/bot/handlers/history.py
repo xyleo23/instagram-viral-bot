@@ -4,6 +4,7 @@ from aiogram.types import Message, CallbackQuery
 from loguru import logger
 
 from app.config import get_config
+from app.bot.keyboards.inline_keyboards import get_main_menu
 from app.models import (
     get_session,
     ProcessedPost,
@@ -109,7 +110,8 @@ async def callback_show_history(callback: CallbackQuery):
             if not posts:
                 await callback.message.edit_text(
                     "📜 *История пуста*\n\nНет обработанных постов.",
-                    parse_mode="Markdown"
+                    parse_mode="Markdown",
+                    reply_markup=get_main_menu()
                 )
                 return
             
@@ -134,8 +136,15 @@ async def callback_show_history(callback: CallbackQuery):
                 text += f"   Статус: {post.status.value}\n"
                 text += f"   Дата: {post.updated_at.strftime('%d.%m.%Y %H:%M')}\n\n"
             
-            await callback.message.edit_text(text, parse_mode="Markdown")
+            await callback.message.edit_text(
+                text,
+                parse_mode="Markdown",
+                reply_markup=get_main_menu()
+            )
             
     except Exception as e:
         logger.error(f"Error showing history: {e}")
-        await callback.message.edit_text("❌ Ошибка при получении истории")
+        await callback.message.edit_text(
+            "❌ Ошибка при получении истории",
+            reply_markup=get_main_menu()
+        )

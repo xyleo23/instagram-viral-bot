@@ -5,7 +5,7 @@ from loguru import logger
 
 from app.config import get_config
 from app.models import get_session, ProcessedPost, ProcessedStatus
-from app.bot.keyboards.inline import get_queue_navigation_keyboard
+from app.bot.keyboards.inline_keyboards import get_main_menu, get_queue_keyboard_with_menu
 from sqlalchemy import select
 
 router = Router(name="queue")
@@ -68,9 +68,17 @@ async def show_queue_page(message: Message, page: int = 0, edit: bool = False):
             if total_posts == 0:
                 text = "📋 *Очередь пуста*\n\nНет постов, ожидающих одобрения."
                 if edit:
-                    await message.edit_text(text, parse_mode="Markdown")
+                    await message.edit_text(
+                        text,
+                        parse_mode="Markdown",
+                        reply_markup=get_main_menu()
+                    )
                 else:
-                    await message.answer(text, parse_mode="Markdown")
+                    await message.answer(
+                        text,
+                        parse_mode="Markdown",
+                        reply_markup=get_main_menu()
+                    )
                 return
             
             # Вычисляем пагинацию
@@ -94,7 +102,7 @@ async def show_queue_page(message: Message, page: int = 0, edit: bool = False):
                 text += f"   Лайки: {original.likes:,}\n"
                 text += f"   ID: `{post.id}`\n\n"
             
-            keyboard = get_queue_navigation_keyboard(page, total_pages)
+            keyboard = get_queue_keyboard_with_menu(page, total_pages)
             
             if edit:
                 await message.edit_text(
@@ -113,6 +121,6 @@ async def show_queue_page(message: Message, page: int = 0, edit: bool = False):
         logger.error(f"Error showing queue: {e}")
         error_text = "❌ Ошибка при получении очереди"
         if edit:
-            await message.edit_text(error_text)
+            await message.edit_text(error_text, reply_markup=get_main_menu())
         else:
-            await message.answer(error_text)
+            await message.answer(error_text, reply_markup=get_main_menu())

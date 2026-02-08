@@ -10,13 +10,13 @@ from app.workers.celery_app import celery_app
 
 
 class AsyncTask(Task):
-    """Базовый класс для async задач."""
+    """Базовый класс для async задач Celery."""
     
     def __call__(self, *args, **kwargs):
-        return asyncio.run(self.run_async(*args, **kwargs))
-    
-    async def run_async(self, *args, **kwargs):
-        raise NotImplementedError
+        result = self.run(*args, **kwargs)
+        if asyncio.iscoroutine(result):
+            return asyncio.run(result)
+        return result
 
 
 @celery_app.task(

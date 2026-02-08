@@ -4,6 +4,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.fsm.storage.redis import RedisStorage
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
+from aiogram.types import BotCommand
 from loguru import logger
 
 from app.config import get_config
@@ -32,6 +33,14 @@ async def main():
         token=config.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.MARKDOWN)
     )
+    
+    # Устанавливаем команды бота
+    await bot.set_my_commands([
+        BotCommand(command="start", description="🏠 Главное меню"),
+        BotCommand(command="status", description="📊 Статус системы"),
+        BotCommand(command="queue", description="📥 Очередь постов"),
+        BotCommand(command="history", description="📜 История"),
+    ])
     
     # Создаем dispatcher с Redis storage для FSM
     storage = RedisStorage.from_url(config.REDIS_URL)

@@ -1,16 +1,23 @@
 from aiogram import Router, F
 from aiogram.filters import Command, CommandStart
 from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.context import FSMContext
 from loguru import logger
 
 from app.config import get_config
 from app.models import get_session, OriginalPost, ProcessedPost, PostStatus, ProcessedStatus
-from app.bot.keyboards.inline import get_main_menu_keyboard
+from app.bot.keyboards.inline_keyboards import get_main_menu
 from sqlalchemy import select, func
 from datetime import datetime, timedelta
 
 router = Router(name="start")
 config = get_config()
+
+
+class ParsingStates(StatesGroup):
+    """FSM состояния для парсинга."""
+    waiting_for_username = State()
 
 
 @router.message(CommandStart())
@@ -51,7 +58,7 @@ async def cmd_start(message: Message):
     await message.answer(
         text,
         parse_mode="Markdown",
-        reply_markup=get_main_menu_keyboard()
+        reply_markup=get_main_menu()
     )
     
     logger.info(f"User {message.from_user.id} started bot")
@@ -210,8 +217,70 @@ async def callback_show_status(callback: CallbackQuery):
                 f"❌ Отклонено: {rejected_count}\n"
             )
             
-            await callback.message.edit_text(text, parse_mode="Markdown")
+            await callback.message.edit_text(
+                text,
+                parse_mode="Markdown",
+                reply_markup=get_main_menu()
+            )
             
     except Exception as e:
         logger.error(f"Error showing status: {e}")
-        await callback.message.edit_text("❌ Ошибка при получении статистики")
+        await callback.message.edit_text(
+            "❌ Ошибка при получении статистики",
+            reply_markup=get_main_menu()
+        )
+
+
+@router.callback_query(F.data == "start_parsing")
+async def callback_start_parsing(callback: CallbackQuery, state: FSMContext):
+    """Запрос username для парсинга."""
+    await callback.answer()
+    
+    if callback.from_user.id != config.ADMIN_CHAT_ID:
+        return
+    
+    await state.set_state(ParsingStates.waiting_for_username)
+    await callback.message.edit_text(
+        "🔎 *Парсинг Instagram аккаунта*\n\n"
+        "Введите username аккаунта для парсинга (без @):",
+        parse_mode="Markdown",
+        reply_markup=get_main_menu()
+    )
+
+
+@router.message(ParsingStates.waiting_for_username)
+async def process_username(message: Message, state: FSMContext):
+    """Обработка введённого username."""
+    if message.from_user.id != config.ADMIN_CHAT_ID:
+        return
+    
+    username = message.text.strip().replace("@", "")
+    
+    if not username:
+        await message.answer("❌ Username не может быть пустым!", reply_markup=get_main_menu())
+        return
+    
+    await state.clear()
+    
+    try:
+        from app.workers.tasks.parsing import parse_specific_account
+        
+        task = parse_specific_account.delay(username)
+        
+        await message.answer(
+            f"✅ *Задача на парсинг запущена!*\n\n"
+            f"Аккаунт: @{username}\n"
+            f"Task ID: {task.id}\n\n"
+            f"Результаты появятся в очереди на одобрение.",
+            parse_mode="Markdown",
+            reply_markup=get_main_menu()
+        )
+        
+        logger.info(f"Parsing task started for @{username}, task_id={task.id}")
+        
+    except Exception as e:
+        logger.error(f"Error starting parsing task: {e}")
+        await message.answer(
+            f"❌ Ошибка при запуске парсинга:\n{str(e)}",
+            reply_markup=get_main_menu()
+        )

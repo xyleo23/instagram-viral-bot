@@ -277,6 +277,17 @@ async def callback_approve(callback: CallbackQuery, state: FSMContext):
             
             await session.commit()
         
+        # Клавиатура с кнопкой "Запланировать"
+        from aiogram.utils.keyboard import InlineKeyboardBuilder
+        from aiogram.types import InlineKeyboardButton
+        builder = InlineKeyboardBuilder()
+        builder.row(
+            InlineKeyboardButton(text="📅 Запланировать", callback_data=f"schedule_post:{post_id}"),
+        )
+        builder.row(
+            InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")
+        )
+
         # Обновляем сообщение
         await callback.message.edit_text(
             f"✅ *Пост одобрен!*\n\n"
@@ -285,7 +296,7 @@ async def callback_approve(callback: CallbackQuery, state: FSMContext):
             f"Одобрил: @{callback.from_user.username}\n\n"
             f"Пост готов к публикации.",
             parse_mode="Markdown",
-            reply_markup=get_main_menu()
+            reply_markup=builder.as_markup()
         )
         
         logger.info(f"Post {post_id} approved by {callback.from_user.id}")

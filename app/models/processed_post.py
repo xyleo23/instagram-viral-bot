@@ -1,5 +1,6 @@
 from typing import Optional, List, Dict, Any
-from sqlalchemy import String, Integer, Float, Text, ForeignKey, JSON, Enum as SQLEnum
+from datetime import datetime
+from sqlalchemy import String, Integer, Float, Text, ForeignKey, JSON, Enum as SQLEnum, DateTime
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import enum
 
@@ -98,6 +99,20 @@ class ProcessedPost(Base, TimestampMixin):
         default=ProcessedStatus.PENDING_APPROVAL,
         nullable=False,
         index=True
+    )
+    
+    # Планирование публикации
+    scheduled_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Запланированное время публикации"
+    )
+    publication_status: Mapped[str] = mapped_column(
+        String(50),
+        default="NOT_SCHEDULED",
+        nullable=False,
+        index=True,
+        comment="NOT_SCHEDULED, SCHEDULED, PUBLISHING, PUBLISHED, FAILED"
     )
     
     # Relations

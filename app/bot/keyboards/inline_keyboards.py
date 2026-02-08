@@ -10,6 +10,7 @@ def get_main_menu() -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="📊 Статус", callback_data="show_status"),
         InlineKeyboardButton(text="📜 История", callback_data="show_history")
     )
+    builder.row(InlineKeyboardButton(text="📅 Расписание", callback_data="show_schedule"))
     builder.row(InlineKeyboardButton(text="🔎 Парсить аккаунт", callback_data="start_parsing"))
     return builder.as_markup()
 
@@ -42,6 +43,7 @@ def get_queue_keyboard_with_menu(page: int, total_pages: int) -> InlineKeyboardM
         InlineKeyboardButton(text="📊 Статус", callback_data="show_status"),
         InlineKeyboardButton(text="📜 История", callback_data="show_history")
     )
+    builder.row(InlineKeyboardButton(text="📅 Расписание", callback_data="show_schedule"))
     builder.row(InlineKeyboardButton(text="🔎 Парсить аккаунт", callback_data="start_parsing"))
 
     return builder.as_markup()

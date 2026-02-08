@@ -374,21 +374,3 @@ async def callback_view_post(callback: CallbackQuery):
             )
 
 
-@router.callback_query(F.data == "main_menu")
-async def callback_main_menu(callback: CallbackQuery):
-    """Возврат в главное меню."""
-    await callback.answer()
-    if not callback.message:
-        return
-    text = (
-        "🎉 *Главное меню*\n\n"
-        "Выберите действие:"
-    )
-    try:
-        await callback.message.edit_text(
-            text,
-            parse_mode="Markdown",
-            reply_markup=get_main_menu(),
-        )
-    except Exception as e:
-        logger.error(f"Error showing main menu: {e}", exc_info=True)

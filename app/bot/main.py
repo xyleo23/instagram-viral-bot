@@ -11,7 +11,7 @@ from app.config import get_config
 from app.utils.logger import setup_logger
 from app.models import init_db, create_tables
 from app.bot.middlewares.logging_middleware import LoggingMiddleware
-from app.bot.handlers import start, queue, approval, history
+from app.bot.handlers import start, queue, approval, history, schedule, menu
 
 
 async def main():
@@ -55,6 +55,8 @@ async def main():
     dp.include_router(queue.router)
     dp.include_router(approval.router)
     dp.include_router(history.router)
+    dp.include_router(schedule.router)
+    dp.include_router(menu.router)
     
     logger.info("All handlers registered")
     

@@ -63,7 +63,21 @@ class Config(BaseSettings):
         description="Apify API Key for Instagram parsing",
     )
 
-    # ==================== INSTAGRAM SETTINGS ====================
+    # ==================== INSTAGRAM PUBLISHING ====================
+    INSTAGRAM_USERNAME: str = Field(
+        default="",
+        description="Instagram username for publishing",
+    )
+    INSTAGRAM_PASSWORD: str = Field(
+        default="",
+        description="Instagram password for publishing",
+    )
+    INSTAGRAM_PROXY: Optional[str] = Field(
+        default=None,
+        description="Proxy URL for Instagram (e.g. http://user:pass@host:port)",
+    )
+
+    # ==================== INSTAGRAM PARSING ====================
     INSTAGRAM_AUTHORS: str = Field(
         default="sanyaagainst,theivansergeev,ivan.loginov_ai,provotorov_pro,generalov_ai",
         description="Comma-separated list of Instagram usernames to parse",

@@ -13,6 +13,9 @@ ENV/
 .env
 .env.local
 
+# Instagram session (sensitive)
+sessions/
+
 # Database
 *.db
 *.sqlite

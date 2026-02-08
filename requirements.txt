@@ -33,6 +33,9 @@ apscheduler==3.10.4
 # Image Processing
 pillow==10.2.0
 
+# Instagram Publishing
+instagrapi==2.1.2
+
 # Utilities
 loguru==0.7.2
 python-multipart==0.0.6

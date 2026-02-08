@@ -102,6 +102,41 @@ def get_queue_navigation_keyboard(
     return builder.as_markup()
 
 
+def get_queue_post_keyboard(
+    post_id: int,
+    page: int,
+    total_pages: int,
+) -> InlineKeyboardMarkup:
+    """
+    Клавиатура для поста в очереди: Одобрить, Отклонить, Подробнее + навигация + главное меню.
+    """
+    builder = InlineKeyboardBuilder()
+
+    builder.row(
+        InlineKeyboardButton(text="✅ Одобрить", callback_data=f"approve_{post_id}"),
+        InlineKeyboardButton(text="❌ Отклонить", callback_data=f"reject_{post_id}"),
+        InlineKeyboardButton(text="👁 Подробнее", callback_data=f"view_{post_id}"),
+    )
+
+    nav_buttons = []
+    if page > 0:
+        nav_buttons.append(
+            InlineKeyboardButton(text="⬅️ Назад", callback_data=f"queue_page:{page - 1}")
+        )
+    nav_buttons.append(
+        InlineKeyboardButton(text=f"📄 {page + 1}/{total_pages}", callback_data="queue_noop")
+    )
+    if page < total_pages - 1:
+        nav_buttons.append(
+            InlineKeyboardButton(text="➡️ Вперед", callback_data=f"queue_page:{page + 1}")
+        )
+    builder.row(*nav_buttons)
+    builder.row(InlineKeyboardButton(text="🔄 Обновить", callback_data=f"queue_page:{page}"))
+    builder.row(InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu"))
+
+    return builder.as_markup()
+
+
 def get_main_menu_keyboard() -> InlineKeyboardMarkup:
     """Главное меню бота."""
     builder = InlineKeyboardBuilder()

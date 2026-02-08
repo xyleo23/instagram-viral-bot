@@ -12,6 +12,7 @@ from app.utils.logger import setup_logger
 from app.models import init_db, create_tables
 from app.bot.middlewares.logging_middleware import LoggingMiddleware
 from app.bot.handlers import start, queue, approval, history, schedule, menu
+from app.workers.scheduler import PostScheduler
 
 
 async def main():
@@ -71,11 +72,15 @@ async def main():
     except Exception as e:
         logger.error(f"Could not send startup message: {e}")
     
-    # Запускаем polling
+    # Запускаем фоновый планировщик публикаций
+    post_scheduler = PostScheduler()
+    await post_scheduler.start()
+
     try:
         logger.info("Bot started. Polling...")
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
+        await post_scheduler.stop()
         await bot.session.close()
         await storage.close()
         logger.info("Bot stopped")

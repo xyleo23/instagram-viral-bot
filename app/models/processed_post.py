@@ -107,12 +107,27 @@ class ProcessedPost(Base, TimestampMixin):
         nullable=True,
         comment="Запланированное время публикации"
     )
+    published_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+        comment="Фактическое время публикации"
+    )
     publication_status: Mapped[str] = mapped_column(
         String(50),
         default="NOT_SCHEDULED",
         nullable=False,
         index=True,
         comment="NOT_SCHEDULED, SCHEDULED, PUBLISHING, PUBLISHED, FAILED"
+    )
+    instagram_post_id: Mapped[Optional[str]] = mapped_column(
+        String(255),
+        nullable=True,
+        comment="ID поста в Instagram"
+    )
+    publication_error: Mapped[Optional[str]] = mapped_column(
+        Text,
+        nullable=True,
+        comment="Текст ошибки при публикации"
     )
     
     # Relations

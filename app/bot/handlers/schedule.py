@@ -132,7 +132,7 @@ async def show_schedule_menu(callback: CallbackQuery):
         return
     
     try:
-        async for session in get_session():
+        async with get_session() as session:
             result = await session.execute(
                 select(ProcessedPost)
                 .where(
@@ -185,7 +185,7 @@ async def schedule_post(callback: CallbackQuery):
     post_id = int(callback.data.split(":")[1])
     
     # Проверяем, что пост одобрен
-    async for session in get_session():
+    async with get_session() as session:
         result = await session.execute(
             select(ProcessedPost).where(ProcessedPost.id == post_id)
         )
@@ -287,7 +287,7 @@ async def calendar_time_selected(callback: CallbackQuery):
     dt_moscow = datetime(y, m, d, hour, minute, tzinfo=MOSCOW_TZ)
     
     try:
-        async for session in get_session():
+        async with get_session() as session:
             result = await session.execute(
                 select(ProcessedPost).where(ProcessedPost.id == post_id)
             )
@@ -342,7 +342,7 @@ async def list_scheduled_posts(callback: CallbackQuery):
         return
     
     try:
-        async for session in get_session():
+        async with get_session() as session:
             result = await session.execute(
                 select(ProcessedPost, OriginalPost)
                 .join(OriginalPost, ProcessedPost.original_post_id == OriginalPost.id)
@@ -404,7 +404,7 @@ async def cancel_scheduled_post(callback: CallbackQuery):
     post_id = int(callback.data.split(":")[1])
     
     try:
-        async for session in get_session():
+        async with get_session() as session:
             result = await session.execute(
                 select(ProcessedPost).where(ProcessedPost.id == post_id)
             )

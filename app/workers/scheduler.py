@@ -89,7 +89,7 @@ class PostScheduler:
         now_moscow = datetime.now(MOSCOW_TZ)
         logger.debug(f"Checking scheduled posts at {now_moscow.isoformat()}")
 
-        async for session in get_session():
+        async with get_session() as session:
             stmt = select(ProcessedPost).where(
                 and_(
                     ProcessedPost.publication_status == "SCHEDULED",

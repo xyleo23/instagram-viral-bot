@@ -336,7 +336,7 @@ class InstagramParser:
         """
         saved_posts = []
         
-        async for session in get_session():
+        async with get_session() as session:
             for post_data in posts:
                 try:
                     # Проверяем существование по external_id

@@ -204,7 +204,7 @@ async def example_database_integration():
     
     try:
         # Получаем посты из БД
-        async for session in get_session():
+        async with get_session() as session:
             result = await session.execute(
                 select(OriginalPost)
                 .where(OriginalPost.status == "filtered")
@@ -228,7 +228,7 @@ async def example_database_integration():
             )
             
             # Сохраняем в БД
-            async for session in get_session():
+            async with get_session() as session:
                 processed = ProcessedPost(
                     original_post_id=post.id,
                     title=ai_result["title"],

@@ -34,7 +34,7 @@ async def main():
         from app.models import get_session, OriginalPost, PostStatus
         from sqlalchemy import select
         
-        async for session in get_session():
+        async with get_session() as session:
             res = await session.execute(
                 select(OriginalPost)
                 .where(OriginalPost.status == PostStatus.FILTERED)

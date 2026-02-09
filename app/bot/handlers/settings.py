@@ -59,7 +59,7 @@ async def cmd_settings(message: Message):
         total_authors = len(authors)
         active_count = len(active)
 
-        async for session in get_session():
+        async with get_session() as session:
             pending_result = await session.execute(
                 select(func.count(ProcessedPost.id)).where(
                     ProcessedPost.status == ProcessedStatus.PENDING_APPROVAL
@@ -109,7 +109,7 @@ async def callback_settings_open(callback: CallbackQuery):
         total_authors = len(authors)
         active_count = len(active)
 
-        async for session in get_session():
+        async with get_session() as session:
             pending_result = await session.execute(
                 select(func.count(ProcessedPost.id)).where(
                     ProcessedPost.status == ProcessedStatus.PENDING_APPROVAL

@@ -47,7 +47,7 @@ async def process_pending_posts(self) -> Dict:
     init_db(config.get_database_url())
     
     # Получаем посты для обработки
-    async for session in get_session():
+    async with get_session() as session:
         result = await session.execute(
             select(OriginalPost)
             .where(OriginalPost.status == PostStatus.FILTERED)
@@ -104,7 +104,7 @@ async def process_single_post(self, post_id: int) -> Dict:
     init_db(config.get_database_url())
     
     # 1. Получаем пост из БД
-    async for session in get_session():
+    async with get_session() as session:
         result = await session.execute(
             select(OriginalPost).where(OriginalPost.id == post_id)
         )
@@ -119,7 +119,7 @@ async def process_single_post(self, post_id: int) -> Dict:
         return {"status": "skipped", "reason": "Already processed"}
     
     # Обновляем статус
-    async for session in get_session():
+    async with get_session() as session:
         post.status = PostStatus.PROCESSING
         session.add(post)
         await session.commit()
@@ -171,7 +171,7 @@ async def process_single_post(self, post_id: int) -> Dict:
         logger.info(f"Uploaded to: {upload_result['folder_url']}")
         
         # 5. Сохраняем ProcessedPost в БД
-        async for session in get_session():
+        async with get_session() as session:
             processed_post = ProcessedPost(
                 original_post_id=post.id,
                 title=ai_result["title"],
@@ -223,7 +223,7 @@ async def process_single_post(self, post_id: int) -> Dict:
         logger.error(f"Error processing post {post_id}: {e}")
         
         # Откатываем статус
-        async for session in get_session():
+        async with get_session() as session:
             post.status = PostStatus.FILTERED
             session.add(post)
             await session.commit()

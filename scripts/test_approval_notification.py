@@ -23,7 +23,7 @@ async def create_test_post() -> int:
     init_db(config.get_database_url())
     
     # Находим любой обработанный пост или создаем тестовый
-    async for session in get_session():
+    async with get_session() as session:
         result = await session.execute(
             select(ProcessedPost)
             .limit(1)

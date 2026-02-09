@@ -109,7 +109,7 @@ async def cmd_status(message: Message):
     await message.answer("⏳ Собираю статистику...")
     
     try:
-        async for session in get_session():
+        async with get_session() as session:
             # Посты на одобрении
             pending_result = await session.execute(
                 select(func.count(ProcessedPost.id))
@@ -179,7 +179,7 @@ async def callback_show_status(callback: CallbackQuery):
         return
     
     try:
-        async for session in get_session():
+        async with get_session() as session:
             # Посты на одобрении
             pending_result = await session.execute(
                 select(func.count(ProcessedPost.id))

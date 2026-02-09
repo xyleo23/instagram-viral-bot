@@ -93,5 +93,5 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 # Для совместимости
 async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """Алиас для get_session()."""
-    async for session in get_session():
+    async with get_session() as session:
         yield session

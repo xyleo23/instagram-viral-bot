@@ -23,7 +23,7 @@ async def main():
     
     # Получаем пост из БД
     post = None
-    async for session in get_session():
+    async with get_session() as session:
         result = await session.execute(
             select(OriginalPost)
             .where(OriginalPost.status == "filtered")

@@ -42,7 +42,7 @@ async def show_queue_page(message: Message, page: int = 0, edit: bool = False):
         edit: Редактировать существующее сообщение или отправить новое
     """
     try:
-        async for session in get_session():
+        async with get_session() as session:
             # Общее количество постов
             count_result = await session.execute(
                 select(func.count(ProcessedPost.id)).where(
@@ -220,7 +220,7 @@ async def callback_approve_post(callback: CallbackQuery):
     logger.info(f"User {callback.from_user.id} approving post {post_id} from queue")
 
     try:
-        async for session in get_session():
+        async with get_session() as session:
             result = await session.execute(
                 select(ProcessedPost).where(ProcessedPost.id == post_id)
             )
@@ -271,7 +271,7 @@ async def callback_reject_post(callback: CallbackQuery):
     logger.info(f"User {callback.from_user.id} rejecting post {post_id} from queue")
 
     try:
-        async for session in get_session():
+        async with get_session() as session:
             result = await session.execute(
                 select(ProcessedPost).where(ProcessedPost.id == post_id)
             )
@@ -320,7 +320,7 @@ async def callback_view_post(callback: CallbackQuery):
         return
 
     try:
-        async for session in get_session():
+        async with get_session() as session:
             result = await session.execute(
                 select(ProcessedPost, OriginalPost)
                 .join(

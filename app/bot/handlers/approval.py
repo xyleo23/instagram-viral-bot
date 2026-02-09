@@ -40,7 +40,7 @@ async def send_post_for_approval(
     logger.info(f"Sending ProcessedPost {processed_post_id} for approval")
     
     # Получаем пост из БД
-    async for session in get_session():
+    async with get_session() as session:
         result = await session.execute(
             select(ProcessedPost)
             .where(ProcessedPost.id == processed_post_id)
@@ -246,7 +246,7 @@ async def callback_approve(callback: CallbackQuery, state: FSMContext):
     logger.info(f"User {callback.from_user.id} approving post {post_id}")
     
     try:
-        async for session in get_session():
+        async with get_session() as session:
             # Получаем пост
             result = await session.execute(
                 select(ProcessedPost).where(ProcessedPost.id == post_id)
@@ -318,7 +318,7 @@ async def callback_reject(callback: CallbackQuery, state: FSMContext):
     logger.info(f"User {callback.from_user.id} rejecting post {post_id}")
     
     try:
-        async for session in get_session():
+        async with get_session() as session:
             result = await session.execute(
                 select(ProcessedPost).where(ProcessedPost.id == post_id)
             )
@@ -396,7 +396,7 @@ async def process_caption_edit(message: Message, state: FSMContext):
     new_caption = message.text
     
     try:
-        async for session in get_session():
+        async with get_session() as session:
             result = await session.execute(
                 select(ProcessedPost).where(ProcessedPost.id == post_id)
             )
@@ -453,7 +453,7 @@ async def process_hashtags_edit(message: Message, state: FSMContext):
     new_hashtags = message.text
     
     try:
-        async for session in get_session():
+        async with get_session() as session:
             result = await session.execute(
                 select(ProcessedPost).where(ProcessedPost.id == post_id)
             )

@@ -60,9 +60,8 @@ async def get_or_create_user_by_telegram_id(
     if session is not None:
         return await _run(session)
 
-    async for sess in get_session():
+    async with get_session() as sess:
         return await _run(sess)
-    raise RuntimeError("get_session did not yield session")
 
 
 class AuthorManager:
@@ -100,7 +99,7 @@ class AuthorManager:
         min_likes = _validate_min_likes(min_likes)
         max_age_days = _validate_max_age_days(max_age_days)
 
-        async for session in get_session():
+        async with get_session() as session:
             user = await get_or_create_user_by_telegram_id(
                 admin_telegram_id, admin_username, session=session
             )
@@ -127,31 +126,28 @@ class AuthorManager:
                 f"Added author @{username} min_likes={min_likes} max_age_days={max_age_days} admin_id={user.id}"
             )
             return author
-        raise RuntimeError("get_session did not yield session")
 
     @staticmethod
     async def get_author(username: str) -> Optional[AuthorSettings]:
         """Возвращает настройки автора по username или None."""
         username = username.strip().replace("@", "").lower()
-        async for session in get_session():
+        async with get_session() as session:
             result = await session.execute(
                 select(AuthorSettings).where(AuthorSettings.username == username)
             )
             return result.scalar_one_or_none()
-        return None
 
     @staticmethod
     async def get_all_authors(admin_telegram_id: int) -> List[AuthorSettings]:
         """Возвращает всех авторов, созданных данным админом."""
         user = await get_or_create_user_by_telegram_id(admin_telegram_id)
-        async for session in get_session():
+        async with get_session() as session:
             result = await session.execute(
                 select(AuthorSettings)
                 .where(AuthorSettings.admin_id == user.id)
                 .order_by(AuthorSettings.username)
             )
             return list(result.scalars().all())
-        return []
 
     @staticmethod
     async def update_author(
@@ -173,7 +169,7 @@ class AuthorManager:
         if max_age_days is not None:
             max_age_days = _validate_max_age_days(max_age_days)
 
-        async for session in get_session():
+        async with get_session() as session:
             result = await session.execute(
                 select(AuthorSettings).where(AuthorSettings.username == username)
             )
@@ -196,7 +192,6 @@ class AuthorManager:
                 changes.append(f"is_active={is_active}")
             logger.info(f"Updated author @{username} " + ", ".join(changes))
             return author
-        return None
 
     @staticmethod
     async def remove_author(username: str) -> bool:
@@ -207,7 +202,7 @@ class AuthorManager:
             True если удалён, False если не найден.
         """
         username = username.strip().replace("@", "").lower()
-        async for session in get_session():
+        async with get_session() as session:
             result = await session.execute(
                 select(AuthorSettings).where(AuthorSettings.username == username)
             )
@@ -217,16 +212,14 @@ class AuthorManager:
             await session.delete(author)
             logger.info(f"Removed author @{username}")
             return True
-        return False
 
     @staticmethod
     async def get_active_authors() -> List[AuthorSettings]:
         """Возвращает только активных авторов (для парсера)."""
-        async for session in get_session():
+        async with get_session() as session:
             result = await session.execute(
                 select(AuthorSettings)
                 .where(AuthorSettings.is_active == True)
                 .order_by(AuthorSettings.username)
             )
             return list(result.scalars().all())
-        return []

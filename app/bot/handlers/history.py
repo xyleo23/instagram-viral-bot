@@ -30,7 +30,7 @@ async def cmd_history(message: Message):
     await message.answer("⏳ Загружаю историю...")
     
     try:
-        async for session in get_session():
+        async with get_session() as session:
             # Получаем последние одобренные/отклоненные посты
             result = await session.execute(
                 select(ProcessedPost)
@@ -91,7 +91,7 @@ async def callback_show_history(callback: CallbackQuery):
         return
     
     try:
-        async for session in get_session():
+        async with get_session() as session:
             # Получаем последние одобренные/отклоненные посты
             result = await session.execute(
                 select(ProcessedPost)

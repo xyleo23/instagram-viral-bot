@@ -98,7 +98,6 @@ class PostScheduler:
             )
             result = await session.execute(stmt)
             posts = result.scalars().all()
-            break
 
         if not posts:
             return

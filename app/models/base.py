@@ -1,4 +1,4 @@
-from typing import AsyncGenerator
+from contextlib import asynccontextmanager
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from sqlalchemy import DateTime, func
@@ -71,10 +71,11 @@ async def drop_tables() -> None:
         await conn.run_sync(Base.metadata.drop_all)
 
 
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
+@asynccontextmanager
+async def get_session():
     """
     Async context manager для сессии БД.
-    
+
     Usage:
         async with get_session() as session:
             result = await session.execute(select(User))
@@ -91,7 +92,8 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
 
 
 # Для совместимости
-async def get_db() -> AsyncGenerator[AsyncSession, None]:
+@asynccontextmanager
+async def get_db():
     """Алиас для get_session()."""
     async with get_session() as session:
         yield session

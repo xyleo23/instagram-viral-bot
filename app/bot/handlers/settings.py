@@ -168,24 +168,53 @@ async def callback_settings_authors(callback: CallbackQuery, state: FSMContext):
     async def reply(text: str, **kwargs):
         await callback.message.edit_text(text, **kwargs)
 
-    await _reply_authors_list(reply, callback.from_user.id, parse_mode="Markdown")
+    await _reply_authors_list(reply, callback.from_user.id)
 
 
 async def _reply_authors_list(send_fn, admin_telegram_id: int, **kwargs):
     """Формирует и отправляет список авторов с клавиатурой. send_fn(text, **kwargs) — async."""
     try:
         authors = await AuthorManager.get_all_authors(admin_telegram_id)
-        if not authors:
+        count = len(authors) if authors is not None else 0
+        logger.info(
+            "authors_list: admin_telegram_id=%s, authors_count=%s",
+            admin_telegram_id,
+            count,
+        )
+
+        if not authors or count == 0:
             text = (
                 "📋 *Управление авторами*\n\n"
-                "Пока ни одного автора не добавлено.\n"
-                "Добавьте авторов, чтобы парсить их посты с персональными настройками."
+                "У вас пока нет отслеживаемых авторов. Добавьте первого через /add_author"
             )
-        else:
-            blocks = ["📋 *Управление авторами*\n"]
-            for a in authors:
-                blocks.append(_format_author(a))
-            text = "\n".join(blocks)
+            await send_fn(
+                text,
+                parse_mode="Markdown",
+                reply_markup=authors_list([]),
+                **kwargs,
+            )
+            return
+
+        if not isinstance(authors, list):
+            logger.warning(
+                "authors_list: authors is not a list, type=%s",
+                type(authors).__name__,
+            )
+            authors = list(authors) if authors else []
+
+        valid_authors = [a for a in authors if isinstance(a, AuthorSettings)]
+        if len(valid_authors) != len(authors):
+            logger.warning(
+                "authors_list: filtered to AuthorSettings only, was %s, now %s",
+                len(authors),
+                len(valid_authors),
+            )
+            authors = valid_authors
+
+        blocks = ["📋 *Управление авторами*\n"]
+        for a in authors:
+            blocks.append(_format_author(a))
+        text = "\n".join(blocks)
         await send_fn(
             text,
             parse_mode="Markdown",
@@ -193,10 +222,11 @@ async def _reply_authors_list(send_fn, admin_telegram_id: int, **kwargs):
             **kwargs,
         )
     except Exception as e:
-        logger.exception(f"Error listing authors: {e}")
+        logger.exception("Error listing authors: admin_telegram_id=%s, error=%s", admin_telegram_id, e)
         await send_fn(
             "❌ Не удалось загрузить список авторов.",
             reply_markup=get_main_menu(),
+            parse_mode="Markdown",
             **kwargs,
         )
 
@@ -392,7 +422,6 @@ async def add_author_cancel_via_list(callback: CallbackQuery, state: FSMContext)
     await _reply_authors_list(
         lambda t, **kw: callback.message.edit_text(t, **kw),
         callback.from_user.id,
-        parse_mode="Markdown",
     )
 
 

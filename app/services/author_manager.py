@@ -4,6 +4,7 @@
 from typing import Optional, List
 
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 from loguru import logger
 
 from app.models import get_session, User, AuthorSettings
@@ -27,29 +28,40 @@ def _validate_max_age_days(value: int) -> int:
     return value
 
 
-async def get_or_create_user_by_telegram_id(telegram_id: int, username: Optional[str] = None) -> User:
+async def get_or_create_user_by_telegram_id(
+    telegram_id: int,
+    username: Optional[str] = None,
+    session: Optional[AsyncSession] = None,
+) -> User:
     """
     Возвращает пользователя по Telegram ID или создаёт нового.
 
     Args:
         telegram_id: Telegram User ID
         username: Telegram username (опционально)
+        session: Опциональная сессия БД (если не передана — создаётся своя).
 
     Returns:
-        User
+        User с заполненным id после flush при создании.
     """
-    async for session in get_session():
-        result = await session.execute(select(User).where(User.telegram_id == telegram_id))
+    async def _run(sess: AsyncSession) -> User:
+        result = await sess.execute(select(User).where(User.telegram_id == telegram_id))
         user = result.scalar_one_or_none()
         if user:
             if username and user.username != username:
                 user.username = username
             return user
-        user = User(telegram_id=telegram_id, username=username)
-        session.add(user)
-        await session.flush()
-        logger.info(f"Created user id={user.id} telegram_id={telegram_id}")
-        return user
+        new_user = User(telegram_id=telegram_id, username=username)
+        sess.add(new_user)
+        await sess.flush()
+        logger.info(f"Created user id={new_user.id} telegram_id={telegram_id}")
+        return new_user
+
+    if session is not None:
+        return await _run(session)
+
+    async for sess in get_session():
+        return await _run(sess)
     raise RuntimeError("get_session did not yield session")
 
 
@@ -88,9 +100,14 @@ class AuthorManager:
         min_likes = _validate_min_likes(min_likes)
         max_age_days = _validate_max_age_days(max_age_days)
 
-        user = await get_or_create_user_by_telegram_id(admin_telegram_id, admin_username)
-
         async for session in get_session():
+            user = await get_or_create_user_by_telegram_id(
+                admin_telegram_id, admin_username, session=session
+            )
+            await session.flush()
+            if user.id is None:
+                raise RuntimeError("User id is None after get_or_create_user_by_telegram_id")
+
             existing = await session.execute(
                 select(AuthorSettings).where(AuthorSettings.username == username)
             )

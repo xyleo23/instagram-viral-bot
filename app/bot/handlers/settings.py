@@ -189,7 +189,6 @@ async def _reply_authors_list(send_fn, admin_telegram_id: int, **kwargs):
             )
             await send_fn(
                 text,
-                parse_mode="Markdown",
                 reply_markup=authors_list([]),
                 **kwargs,
             )
@@ -217,7 +216,6 @@ async def _reply_authors_list(send_fn, admin_telegram_id: int, **kwargs):
         text = "\n".join(blocks)
         await send_fn(
             text,
-            parse_mode="Markdown",
             reply_markup=authors_list(authors),
             **kwargs,
         )
@@ -226,7 +224,6 @@ async def _reply_authors_list(send_fn, admin_telegram_id: int, **kwargs):
         await send_fn(
             "❌ Не удалось загрузить список авторов.",
             reply_markup=get_main_menu(),
-            parse_mode="Markdown",
             **kwargs,
         )
 

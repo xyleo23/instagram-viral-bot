@@ -1,8 +1,8 @@
-# Core Bot
+# Telegram Bot
 aiogram==3.10.0
 python-dotenv==1.0.1
 
-# Async & HTTP
+# HTTP & Async
 aiohttp==3.9.1
 aiofiles==23.2.1
 
@@ -13,18 +13,18 @@ aiosqlite==0.19.0
 alembic==1.13.1
 psycopg2-binary==2.9.9
 
-# Redis & Caching
+# Cache
 redis==5.0.1
 hiredis==2.3.2
 
-# Workers
+# Task Queue
 celery==5.3.4
 kombu==5.3.4
 
-# FastAPI
+# API
 fastapi==0.109.0
 uvicorn==0.27.0
-pydantic==2.5.3
+pydantic==2.7.1
 pydantic-settings==2.1.0
 
 # Scheduler
@@ -33,7 +33,7 @@ apscheduler==3.10.4
 # Image Processing
 pillow==10.2.0
 
-# Instagram Publishing
+# Instagram
 instagrapi==2.1.2
 
 # Utilities

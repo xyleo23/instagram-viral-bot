@@ -11,3 +11,17 @@ class ApprovalStates(StatesGroup):
 class ManualParsingStates(StatesGroup):
     """Состояния для ручного парсинга."""
     waiting_username = State()
+
+
+class AddAuthorStates(StatesGroup):
+    """Состояния для добавления автора."""
+    username = State()
+    min_likes = State()
+    max_age_days = State()
+    confirm = State()
+
+
+class EditAuthorStates(StatesGroup):
+    """Состояния для редактирования автора."""
+    field_choice = State()
+    new_value = State()

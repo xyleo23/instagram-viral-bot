@@ -10,6 +10,7 @@ from app.workers.celery_app import celery_app
 from app.config import get_config
 from app.models import init_db, get_session, OriginalPost, PostStatus
 from app.services.instagram_parser import InstagramParser
+from app.services.author_manager import AuthorManager
 from sqlalchemy import select
 
 
@@ -46,12 +47,11 @@ async def parse_instagram_accounts(self) -> Dict:
     parser = InstagramParser(api_key=config.APIFY_API_KEY)
     
     try:
-        # 1. Парсим аккаунты
-        posts = await parser.parse_accounts(
-            accounts=config.instagram_authors_list,
-            min_likes=config.MIN_LIKES,
-            max_age_days=config.MAX_POST_AGE_DAYS,
-            posts_limit=10
+        # 1. Парсим аккаунты (активные авторы из AuthorSettings с персональными настройками)
+        posts = await parser.parse_accounts_with_settings(
+            posts_limit=10,
+            fallback_min_likes=config.MIN_LIKES,
+            fallback_max_age_days=config.MAX_POST_AGE_DAYS,
         )
         
         logger.info(f"Fetched {len(posts)} viral posts")
@@ -112,11 +112,15 @@ async def parse_specific_account(self, username: str) -> Dict:
     parser = InstagramParser(api_key=config.APIFY_API_KEY)
     
     try:
+        # Настройки для этого автора из БД или конфиг
+        author = await AuthorManager.get_author(username)
+        min_likes = author.min_likes if author else config.MIN_LIKES
+        max_age_days = author.max_post_age_days if author else config.MAX_POST_AGE_DAYS
         posts = await parser.parse_accounts(
             accounts=[username],
-            min_likes=config.MIN_LIKES,
-            max_age_days=config.MAX_POST_AGE_DAYS,
-            posts_limit=5
+            min_likes=min_likes,
+            max_age_days=max_age_days,
+            posts_limit=5,
         )
         
         saved = await parser.save_to_db(posts)

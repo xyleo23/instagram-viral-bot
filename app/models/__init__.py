@@ -2,6 +2,8 @@ from app.models.base import Base, TimestampMixin, init_db, create_tables, drop_t
 from app.models.post import OriginalPost, PostStatus
 from app.models.processed_post import ProcessedPost, ProcessedStatus
 from app.models.approval import ApprovalHistory, DecisionType
+from app.models.user import User
+from app.models.author_settings import AuthorSettings
 
 __all__ = [
     # Base
@@ -20,4 +22,6 @@ __all__ = [
     "ProcessedStatus",
     "ApprovalHistory",
     "DecisionType",
+    "User",
+    "AuthorSettings",
 ]

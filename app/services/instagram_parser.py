@@ -2,7 +2,7 @@
 Сервис парсинга Instagram через Apify API.
 """
 import asyncio
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime, timedelta
 import aiohttp
 from loguru import logger
@@ -10,6 +10,7 @@ import json
 
 from app.config import get_config
 from app.models import OriginalPost, PostStatus, get_session
+from app.services.author_manager import AuthorManager
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -238,7 +239,86 @@ class InstagramParser:
         filtered.sort(key=lambda x: x.get("likesCount", 0), reverse=True)
         
         return filtered
-    
+
+    def filter_viral_posts_per_author(
+        self,
+        posts: List[Dict[str, Any]],
+        author_settings_map: Dict[str, Tuple[int, int]],
+        min_text_length: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        Фильтрует посты по персональным настройкам авторов.
+        author_settings_map: username -> (min_likes, max_age_days)
+        """
+        filtered = []
+        for post in posts:
+            try:
+                if not all(k in post for k in ["id", "ownerUsername", "caption", "likesCount"]):
+                    continue
+                username = (post.get("ownerUsername") or "").strip().lower()
+                settings = author_settings_map.get(username)
+                if not settings:
+                    logger.debug(f"No settings for @{username}, skipping post")
+                    continue
+                min_likes, max_age_days = settings
+                cutoff_date = datetime.utcnow() - timedelta(days=max_age_days)
+                likes = post.get("likesCount", 0)
+                if likes < min_likes:
+                    continue
+                timestamp = post.get("timestamp")
+                if timestamp:
+                    post_date = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    if post_date < cutoff_date:
+                        continue
+                caption = post.get("caption", "")
+                if len(caption) < min_text_length:
+                    continue
+                filtered.append(post)
+            except Exception as e:
+                logger.warning(f"Error filtering post {post.get('id')}: {e}")
+        filtered.sort(key=lambda x: x.get("likesCount", 0), reverse=True)
+        return filtered
+
+    async def parse_accounts_with_settings(
+        self,
+        posts_limit: int = 10,
+        fallback_min_likes: Optional[int] = None,
+        fallback_max_age_days: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Парсит только активных авторов из AuthorManager с персональными настройками.
+        Если активных авторов нет — использует config (instagram_authors_list, MIN_LIKES, MAX_POST_AGE_DAYS).
+        """
+        authors = await AuthorManager.get_active_authors()
+        config = get_config()
+        if not authors:
+            logger.info("No active authors in DB, using config list and defaults")
+            accounts = config.instagram_authors_list
+            min_likes = fallback_min_likes if fallback_min_likes is not None else config.MIN_LIKES
+            max_age_days = fallback_max_age_days if fallback_max_age_days is not None else config.MAX_POST_AGE_DAYS
+            return await self.parse_accounts(
+                accounts=accounts,
+                min_likes=min_likes,
+                max_age_days=max_age_days,
+                posts_limit=posts_limit,
+            )
+        accounts = [a.username for a in authors]
+        author_settings_map = {
+            a.username: (a.min_likes, a.max_post_age_days) for a in authors
+        }
+        logger.info(f"Parsing {len(accounts)} active authors with per-author settings")
+        run_id = await self._start_apify_run(accounts, posts_limit)
+        await self._wait_for_run(run_id)
+        posts = await self._get_results(run_id)
+        logger.info(f"Fetched {len(posts)} posts from Apify")
+        filtered = self.filter_viral_posts_per_author(
+            posts,
+            author_settings_map=author_settings_map,
+            min_text_length=config.MIN_TEXT_LENGTH,
+        )
+        logger.info(f"Filtered to {len(filtered)} viral posts (per-author settings)")
+        return filtered
+
     async def save_to_db(
         self,
         posts: List[Dict[str, Any]],

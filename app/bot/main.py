@@ -11,7 +11,7 @@ from app.config import get_config
 from app.utils.logger import setup_logger
 from app.models import init_db, create_tables
 from app.bot.middlewares.logging_middleware import LoggingMiddleware
-from app.bot.handlers import start, queue, approval, history, schedule, menu
+from app.bot.handlers import start, queue, approval, history, schedule, menu, settings
 from app.workers.scheduler import PostScheduler
 
 
@@ -41,6 +41,9 @@ async def main():
         BotCommand(command="status", description="📊 Статус системы"),
         BotCommand(command="queue", description="📥 Очередь постов"),
         BotCommand(command="history", description="📜 История"),
+        BotCommand(command="settings", description="⚙️ Настройки"),
+        BotCommand(command="authors", description="👥 Управление авторами"),
+        BotCommand(command="add_author", description="➕ Добавить автора"),
     ])
     
     # Создаем dispatcher с Redis storage для FSM
@@ -58,6 +61,7 @@ async def main():
     dp.include_router(history.router)
     dp.include_router(schedule.router)
     dp.include_router(menu.router)
+    dp.include_router(settings.router)
     
     logger.info("All handlers registered")
     

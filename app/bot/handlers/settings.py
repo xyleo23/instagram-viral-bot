@@ -72,8 +72,8 @@ async def cmd_settings(message: Message):
             total_posts = total_posts_result.scalar() or 0
 
         text = (
-            "⚙️ *Настройки*\n\n"
-            "📊 *Статистика:*\n"
+            "⚙️ <b>Настройки</b>\n\n"
+            "📊 <b>Статистика:</b>\n"
             f"👥 Всего авторов: {total_authors}\n"
             f"✅ Активных: {active_count}\n"
             f"📝 Всего постов в базе: {total_posts}\n"
@@ -82,7 +82,7 @@ async def cmd_settings(message: Message):
         )
         await message.answer(
             text,
-            parse_mode="Markdown",
+            parse_mode="HTML",
             reply_markup=settings_menu(),
         )
         logger.info(f"User {message.from_user.id} opened settings")
@@ -122,8 +122,8 @@ async def callback_settings_open(callback: CallbackQuery):
             total_posts = total_posts_result.scalar() or 0
 
         text = (
-            "⚙️ *Настройки*\n\n"
-            "📊 *Статистика:*\n"
+            "⚙️ <b>Настройки</b>\n\n"
+            "📊 <b>Статистика:</b>\n"
             f"👥 Всего авторов: {total_authors}\n"
             f"✅ Активных: {active_count}\n"
             f"📝 Всего постов в базе: {total_posts}\n"
@@ -132,7 +132,7 @@ async def callback_settings_open(callback: CallbackQuery):
         )
         await callback.message.edit_text(
             text,
-            parse_mode="Markdown",
+            parse_mode="HTML",
             reply_markup=settings_menu(),
         )
     except Exception as e:
@@ -184,11 +184,12 @@ async def _reply_authors_list(send_fn, admin_telegram_id: int, **kwargs):
 
         if not authors or count == 0:
             text = (
-                "📋 *Управление авторами*\n\n"
+                "📋 <b>Управление авторами</b>\n\n"
                 "У вас пока нет отслеживаемых авторов. Добавьте первого через /add_author"
             )
             await send_fn(
                 text,
+                parse_mode="HTML",
                 reply_markup=authors_list([]),
                 **kwargs,
             )
@@ -210,12 +211,13 @@ async def _reply_authors_list(send_fn, admin_telegram_id: int, **kwargs):
             )
             authors = valid_authors
 
-        blocks = ["📋 *Управление авторами*\n"]
+        blocks = ["📋 <b>Управление авторами</b>\n"]
         for a in authors:
             blocks.append(_format_author(a))
         text = "\n".join(blocks)
         await send_fn(
             text,
+            parse_mode="HTML",
             reply_markup=authors_list(authors),
             **kwargs,
         )
@@ -238,9 +240,9 @@ async def cmd_add_author(message: Message, state: FSMContext):
         return
     await state.set_state(AddAuthorStates.username)
     await message.answer(
-        "➕ *Добавление автора*\n\n"
+        "➕ <b>Добавление автора</b>\n\n"
         "Введите Instagram username (без @):",
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=back_to_authors(),
     )
     logger.info(f"User {message.from_user.id} started add_author")
@@ -256,9 +258,9 @@ async def callback_author_add(callback: CallbackQuery, state: FSMContext):
         return
     await state.set_state(AddAuthorStates.username)
     await callback.message.edit_text(
-        "➕ *Добавление автора*\n\n"
+        "➕ <b>Добавление автора</b>\n\n"
         "Введите Instagram username (без @):",
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=back_to_authors(),
     )
 
@@ -273,9 +275,9 @@ async def add_author_username(message: Message, state: FSMContext):
     await state.update_data(username=username)
     await state.set_state(AddAuthorStates.min_likes)
     await message.answer(
-        f"💗 Введите *минимум лайков* для постов (число, не меньше {MIN_LIKES_LOWER}):\n\n"
+        f"💗 Введите <b>минимум лайков</b> для постов (число, не меньше {MIN_LIKES_LOWER}):\n\n"
         "Или отправьте 0 для значения по умолчанию (1 000).",
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=back_to_authors(),
     )
 
@@ -297,9 +299,9 @@ async def add_author_min_likes(message: Message, state: FSMContext):
     await state.update_data(min_likes=min_likes)
     await state.set_state(AddAuthorStates.max_age_days)
     await message.answer(
-        f"📅 Введите *максимальный возраст поста* в днях (от {MAX_AGE_DAYS_MIN} до {MAX_AGE_DAYS_MAX}):\n\n"
+        f"📅 Введите <b>максимальный возраст поста</b> в днях (от {MAX_AGE_DAYS_MIN} до {MAX_AGE_DAYS_MAX}):\n\n"
         "Или отправьте 0 для значения по умолчанию (3).",
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=back_to_authors(),
     )
 
@@ -326,7 +328,7 @@ async def add_author_max_age(message: Message, state: FSMContext):
     username = data.get("username", "")
     min_likes = data.get("min_likes", 1000)
     summary = (
-        "✅ *Проверьте данные:*\n\n"
+        "✅ <b>Проверьте данные:</b>\n\n"
         f"👤 Автор: @{username}\n"
         f"💗 Минимум лайков: {min_likes:,}\n"
         f"📅 Возраст постов: {max_age_days} дн.\n\n"
@@ -345,7 +347,7 @@ async def add_author_max_age(message: Message, state: FSMContext):
     )
     await message.answer(
         summary,
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=builder.as_markup(),
     )
 
@@ -376,7 +378,7 @@ async def add_author_confirm(callback: CallbackQuery, state: FSMContext):
             f"✅ Автор @{username} успешно добавлен!\n\n"
             f"💗 Минимум лайков: {min_likes:,}\n"
             f"📅 Возраст постов: {max_age_days} дн.",
-            parse_mode="Markdown",
+            parse_mode="HTML",
             reply_markup=back_to_authors(),
         )
         logger.info(f"Author @{username} added by user {callback.from_user.id}")
@@ -441,10 +443,10 @@ async def callback_author_edit(callback: CallbackQuery):
             reply_markup=back_to_authors(),
         )
         return
-    text = "✏️ *Редактирование автора*\n\n" + _format_author(author)
+    text = "✏️ <b>Редактирование автора</b>\n\n" + _format_author(author)
     await callback.message.edit_text(
         text,
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=edit_author_menu(username),
     )
 
@@ -471,7 +473,7 @@ async def callback_edit_author_field(callback: CallbackQuery, state: FSMContext)
         status = "активен" if new_active else "неактивен"
         await callback.message.edit_text(
             f"✅ Автор @{username} теперь {status}.",
-            parse_mode="Markdown",
+            parse_mode="HTML",
             reply_markup=edit_author_menu(username),
         )
         return
@@ -479,15 +481,15 @@ async def callback_edit_author_field(callback: CallbackQuery, state: FSMContext)
     await state.update_data(edit_author_username=username, edit_author_field=field)
     await state.set_state(EditAuthorStates.new_value)
     if field == "min_likes":
-        prompt = f"💗 Введите новое значение *минимум лайков* (не меньше {MIN_LIKES_LOWER}):"
+        prompt = f"💗 Введите новое значение <b>минимум лайков</b> (не меньше {MIN_LIKES_LOWER}):"
     elif field == "max_age_days":
-        prompt = f"📅 Введите новый *возраст постов* в днях (от {MAX_AGE_DAYS_MIN} до {MAX_AGE_DAYS_MAX}):"
+        prompt = f"📅 Введите новый <b>возраст постов</b> в днях (от {MAX_AGE_DAYS_MIN} до {MAX_AGE_DAYS_MAX}):"
     else:
         await state.clear()
         return
     await callback.message.edit_text(
         prompt,
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=back_to_authors(),
     )
 
@@ -508,7 +510,7 @@ async def edit_author_new_value(message: Message, state: FSMContext):
             await AuthorManager.update_author(username, min_likes=val)
             await message.answer(
                 f"✅ Минимум лайков для @{username} установлен: {val:,}",
-                parse_mode="Markdown",
+                parse_mode="HTML",
                 reply_markup=edit_author_menu(username),
             )
         elif field == "max_age_days":
@@ -521,7 +523,7 @@ async def edit_author_new_value(message: Message, state: FSMContext):
             await AuthorManager.update_author(username, max_age_days=val)
             await message.answer(
                 f"✅ Возраст постов для @{username}: {val} дн.",
-                parse_mode="Markdown",
+                parse_mode="HTML",
                 reply_markup=edit_author_menu(username),
             )
         else:
@@ -548,7 +550,7 @@ async def callback_author_delete(callback: CallbackQuery):
     if removed:
         await callback.message.edit_text(
             f"🗑 Автор @{username} удалён из списка.",
-            parse_mode="Markdown",
+            parse_mode="HTML",
             reply_markup=back_to_authors(),
         )
         logger.info(f"Author @{username} removed by user {callback.from_user.id}")

@@ -60,7 +60,15 @@ class Config(BaseSettings):
     )
     APIFY_API_KEY: str = Field(
         default="",
-        description="Apify API Key for Instagram parsing",
+        description="Apify API Key for Instagram parsing (deprecated, use APIFY_TOKEN)",
+    )
+    APIFY_TOKEN: str = Field(
+        default="",
+        description="Apify API Token for Instagram parsing (acts)",
+    )
+    APIFY_INSTAGRAM_ACT_ID: str = Field(
+        default="",
+        description="Apify Actor ID for Instagram scraper (e.g. culc72xb7MP3EbaeX)",
     )
 
     # ==================== INSTAGRAM PUBLISHING ====================

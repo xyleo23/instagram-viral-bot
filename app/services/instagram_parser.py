@@ -8,42 +8,56 @@ import aiohttp
 from loguru import logger
 import json
 
-from app.config import get_config
+from app.config import get_config, Config
 from app.models import OriginalPost, PostStatus, get_session
 from app.services.author_manager import AuthorManager
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 
+def _normalize_start_urls(accounts: List[str]) -> List[str]:
+    """Преобразует список username или URL в список startUrls."""
+    urls = []
+    for acc in accounts:
+        acc = (acc or "").strip()
+        if not acc:
+            continue
+        if acc.startswith("http://") or acc.startswith("https://"):
+            urls.append(acc)
+        else:
+            urls.append(f"https://www.instagram.com/{acc}/")
+    return urls
+
+
 class InstagramParser:
     """Сервис парсинга Instagram через Apify API."""
-    
-    def __init__(self, api_key: str):
+
+    def __init__(self, settings: Optional[Config] = None):
         """
         Инициализация парсера.
-        
+
         Args:
-            api_key: Apify API ключ
+            settings: Конфигурация (если None — используется get_config()).
         """
-        self.api_key = api_key
-        self.base_url = "https://api.apify.com/v2"
-        self.actor_id = "apify/instagram-scraper"  # ID актера Apify
-        
-        # HTTP сессия
+        self.settings = settings or get_config()
+        self._token = getattr(self.settings, "APIFY_TOKEN", None) or getattr(
+            self.settings, "APIFY_API_KEY", ""
+        )
+        self._act_id = getattr(self.settings, "APIFY_INSTAGRAM_ACT_ID", "") or ""
         self._session: Optional[aiohttp.ClientSession] = None
-    
+
     async def _get_session(self) -> aiohttp.ClientSession:
         """Получает или создает HTTP сессию."""
         if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=300)  # 5 минут
+            timeout = aiohttp.ClientTimeout(total=300)
             self._session = aiohttp.ClientSession(timeout=timeout)
         return self._session
-    
+
     async def close(self):
         """Закрывает HTTP сессию."""
         if self._session and not self._session.closed:
             await self._session.close()
-    
+
     async def parse_accounts(
         self,
         accounts: List[str],
@@ -53,135 +67,162 @@ class InstagramParser:
     ) -> List[Dict[str, Any]]:
         """
         Парсит Instagram аккаунты через Apify.
-        
+
         Args:
-            accounts: Список username'ов для парсинга
+            accounts: Список username'ов или URL для парсинга
             min_likes: Минимум лайков для фильтра
             max_age_days: Максимальный возраст поста
             posts_limit: Сколько постов парсить с каждого аккаунта
-        
+
         Returns:
             Список постов в формате dict
         """
         logger.info(f"Starting Instagram parsing for {len(accounts)} accounts")
-        
+
         try:
-            # 1. Запустить Apify актер
             run_id = await self._start_apify_run(accounts, posts_limit)
-            logger.info(f"Apify run started: {run_id}")
-            
-            # 2. Дождаться завершения
-            await self._wait_for_run(run_id)
-            
-            # 3. Получить результаты
-            posts = await self._get_results(run_id)
+            run_info = await self._wait_for_apify_run(run_id)
+            dataset_id = run_info.get("data", {}).get("defaultDatasetId") or run_info.get("defaultDatasetId")
+            if not dataset_id:
+                raise ValueError("Apify run did not return defaultDatasetId")
+            posts = await self._fetch_items_from_dataset(dataset_id)
             logger.info(f"Fetched {len(posts)} posts from Apify")
-            
-            # 4. Фильтровать по критериям
+
             filtered = await self.filter_viral_posts(
                 posts,
                 min_likes=min_likes,
                 max_age_days=max_age_days
             )
-            
             logger.info(f"Filtered to {len(filtered)} viral posts")
             return filtered
-            
+
         except Exception as e:
             logger.error(f"Error parsing Instagram: {e}")
             raise
-    
+
     async def _start_apify_run(
         self,
         accounts: List[str],
         posts_limit: int
     ) -> str:
         """
-        Запускает Apify актер.
-        
+        Запускает Apify акт по URL:
+        https://api.apify.com/v2/acts/{ACT_ID}/runs?token={TOKEN}
+
         Returns:
             Run ID
         """
-        session = await self._get_session()
-        
-        # Формируем input для актера
-        actor_input = {
-            "directUrls": [f"https://www.instagram.com/{acc}/" for acc in accounts],
-            "resultsType": "posts",
-            "resultsLimit": posts_limit,
-            "searchType": "user",
-            "searchLimit": 1,
-            "addParentData": False
+        act_id = self._act_id
+        token = self._token
+        if not act_id or not token:
+            raise ValueError("APIFY_INSTAGRAM_ACT_ID and APIFY_TOKEN must be set in settings")
+
+        start_urls = _normalize_start_urls(accounts)
+        payload = {
+            "startUrls": start_urls,
+            "maximumItems": posts_limit,
         }
-        
-        url = f"{self.base_url}/acts/{self.actor_id}/runs"
-        params = {"token": self.api_key}
-        
-        async with session.post(url, params=params, json=actor_input) as resp:
-            resp.raise_for_status()
-            data = await resp.json()
-            return data["data"]["id"]
-    
-    async def _wait_for_run(
+        url = f"https://api.apify.com/v2/acts/{act_id}/runs?token={token}"
+
+        logger.info(f"Starting Apify run for {len(accounts)} accounts via {act_id}")
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(url, json=payload) as resp:
+                    if resp.status not in (200, 201):
+                        body = await resp.text()
+                        logger.error(f"Apify start run failed: status={resp.status}, url={url}, body={body}")
+                        resp.raise_for_status()
+                    data = await resp.json()
+            run_id = (data.get("data") or {}).get("id") or data.get("id")
+            if not run_id:
+                logger.error(f"Apify response missing run id: {data}")
+                raise ValueError("Apify response missing run id")
+            logger.info(f"Apify run started: run_id={run_id}")
+            return str(run_id)
+        except aiohttp.ClientError as e:
+            logger.exception(f"Apify request error: url={url}, payload={payload}, error={e}")
+            raise
+        except Exception as e:
+            logger.exception(f"Apify start run error: url={url}, payload={payload}, error={e}")
+            raise
+
+    async def _wait_for_apify_run(
         self,
         run_id: str,
         max_wait: int = 300,
         poll_interval: int = 5
-    ) -> None:
+    ) -> Dict[str, Any]:
         """
         Ждет завершения Apify run.
-        
-        Args:
-            run_id: ID запуска
-            max_wait: Максимальное время ожидания в секундах
-            poll_interval: Интервал проверки статуса
+        URL: https://api.apify.com/v2/acts/{act_id}/runs/{run_id}?token={token}
+
+        Returns:
+            Полный ответ run (для получения defaultDatasetId).
         """
-        session = await self._get_session()
-        url = f"{self.base_url}/actor-runs/{run_id}"
-        params = {"token": self.api_key}
-        
+        act_id = self._act_id
+        token = self._token
+        url = f"https://api.apify.com/v2/acts/{act_id}/runs/{run_id}?token={token}"
+
         start_time = datetime.now()
-        
-        while True:
-            # Проверяем timeout
-            if (datetime.now() - start_time).total_seconds() > max_wait:
-                raise TimeoutError(f"Apify run {run_id} timeout after {max_wait}s")
-            
-            # Проверяем статус
-            async with session.get(url, params=params) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
-                status = data["data"]["status"]
-                
-                logger.debug(f"Apify run {run_id} status: {status}")
-                
-                if status == "SUCCEEDED":
-                    logger.info(f"Apify run {run_id} succeeded")
-                    return
-                elif status in ["FAILED", "ABORTED", "TIMED-OUT"]:
-                    raise Exception(f"Apify run {run_id} failed with status: {status}")
-            
-            # Ждем перед следующей проверкой
-            await asyncio.sleep(poll_interval)
-    
+        last_data: Dict[str, Any] = {}
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                while True:
+                    if (datetime.now() - start_time).total_seconds() > max_wait:
+                        raise TimeoutError(f"Apify run {run_id} timeout after {max_wait}s")
+
+                    async with session.get(url) as resp:
+                        if resp.status != 200:
+                            body = await resp.text()
+                            logger.error(f"Apify run status failed: status={resp.status}, url={url}, body={body}")
+                            resp.raise_for_status()
+                        data = await resp.json()
+                    last_data = data
+                    status = (data.get("data") or {}).get("status") or data.get("status", "")
+
+                    logger.debug(f"Apify run {run_id} status: {status}")
+
+                    if status == "SUCCEEDED":
+                        logger.info(f"Apify run {run_id} succeeded")
+                        return data
+                    if status in ("FAILED", "ABORTED", "TIMED-OUT", "TIMED_OUT"):
+                        raise Exception(f"Apify run {run_id} failed with status: {status}")
+
+                    await asyncio.sleep(poll_interval)
+        except aiohttp.ClientError as e:
+            logger.exception(f"Apify wait run request error: url={url}, error={e}")
+            raise
+
+    async def _fetch_items_from_dataset(self, dataset_id: str) -> List[Dict[str, Any]]:
+        """
+        Получает элементы датасета по ID.
+        GET https://api.apify.com/v2/datasets/{dataset_id}/items?token={token}
+        """
+        token = self._token
+        url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?token={token}"
+
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as resp:
+                    resp.raise_for_status()
+                    items = await resp.json()
+            logger.info(f"Fetched {len(items)} items from dataset {dataset_id}")
+            return items if isinstance(items, list) else list(items)
+        except aiohttp.ClientError as e:
+            logger.exception(f"Apify dataset fetch error: url={url}, error={e}")
+            raise
+
     async def _get_results(self, run_id: str) -> List[Dict[str, Any]]:
         """
-        Получает результаты Apify run.
-        
-        Args:
-            run_id: ID запуска
-        
-        Returns:
-            Список постов
+        Получает результаты Apify run через defaultDatasetId (для обратной совместимости).
         """
-        session = await self._get_session()
-        url = f"{self.base_url}/actor-runs/{run_id}/dataset/items"
-        params = {"token": self.api_key}
-        
-        async with session.get(url, params=params) as resp:
-            resp.raise_for_status()
-            posts = await resp.json()
-            return posts
+        run_info = await self._wait_for_apify_run(run_id)
+        dataset_id = run_info.get("data", {}).get("defaultDatasetId") or run_info.get("defaultDatasetId")
+        if not dataset_id:
+            raise ValueError("Apify run did not return defaultDatasetId")
+        return await self._fetch_items_from_dataset(dataset_id)
     
     async def filter_viral_posts(
         self,
@@ -308,8 +349,11 @@ class InstagramParser:
         }
         logger.info(f"Parsing {len(accounts)} active authors with per-author settings")
         run_id = await self._start_apify_run(accounts, posts_limit)
-        await self._wait_for_run(run_id)
-        posts = await self._get_results(run_id)
+        run_info = await self._wait_for_apify_run(run_id)
+        dataset_id = run_info.get("data", {}).get("defaultDatasetId") or run_info.get("defaultDatasetId")
+        if not dataset_id:
+            raise ValueError("Apify run did not return defaultDatasetId")
+        posts = await self._fetch_items_from_dataset(dataset_id)
         logger.info(f"Fetched {len(posts)} posts from Apify")
         filtered = self.filter_viral_posts_per_author(
             posts,
@@ -395,8 +439,7 @@ class InstagramParser:
 async def main():
     """Пример использования."""
     config = get_config()
-    
-    parser = InstagramParser(api_key=config.APIFY_API_KEY)
+    parser = InstagramParser(settings=config)
     
     try:
         # Парсинг

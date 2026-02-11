@@ -1,6 +1,7 @@
 from typing import Optional, List
 from sqlalchemy import String, Integer, Float, Text, Index, Enum as SQLEnum
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy.types import TIMESTAMP
 from datetime import datetime, timedelta
 import enum
 
@@ -85,6 +86,7 @@ class OriginalPost(Base, TimestampMixin):
     
     # Даты
     posted_at: Mapped[datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
         nullable=False,
         comment="Когда пост был создан в Instagram"
     )

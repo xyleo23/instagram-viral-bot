@@ -140,11 +140,11 @@ class InstagramParser:
         if not act_id or not token:
             raise ValueError("APIFY_INSTAGRAM_ACT_ID and APIFY_TOKEN must be set in settings")
 
-        start_urls = _normalize_start_urls(accounts)
-        payload = {
-            "startUrls": start_urls,
-            "maximumItems": posts_limit,
+        run_input = {
+            "startUrls": [f"https://www.instagram.com/{username.lstrip('@')}/" for username in accounts],
+            "maxItems": posts_limit,
         }
+        payload = run_input
         url = f"https://api.apify.com/v2/acts/{act_id}/runs?token={token}"
 
         logger.info(f"Starting Apify run for {len(accounts)} accounts via {act_id}")

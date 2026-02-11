@@ -88,6 +88,27 @@ class InstagramParser:
             posts = await self._fetch_items_from_dataset(dataset_id)
             logger.info(f"Fetched {len(posts)} posts from Apify")
 
+            # Логируем сырые данные первых 5 постов для отладки
+            for i, item in enumerate(posts[:5]):
+                shortcode = item.get("shortCode") or item.get("id", "?")
+                likes = item.get("likesCount")
+                ts = item.get("timestamp")
+                owner = item.get("ownerUsername")
+                age_str = "N/A"
+                if ts:
+                    try:
+                        post_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                        if post_dt.tzinfo:
+                            age_days_val = (datetime.now(post_dt.tzinfo) - post_dt).days
+                        else:
+                            age_days_val = (datetime.utcnow() - post_dt).days
+                        age_str = f"{age_days_val} days"
+                    except Exception:
+                        pass
+                logger.debug(
+                    f"Raw post {i + 1}: shortcode={shortcode}, likes={likes}, timestamp={ts}, owner={owner}, age={age_str}"
+                )
+
             filtered = await self.filter_viral_posts(
                 posts,
                 min_likes=min_likes,
@@ -245,33 +266,58 @@ class InstagramParser:
         """
         filtered = []
         cutoff_date = datetime.utcnow() - timedelta(days=max_age_days)
-        
+
         for post in posts:
             try:
-                # Проверяем наличие обязательных полей
-                if not all(k in post for k in ["id", "ownerUsername", "caption", "likesCount"]):
-                    continue
-                
-                # Фильтруем по лайкам
+                shortcode = post.get("shortCode") or post.get("id", "?")
                 likes = post.get("likesCount", 0)
-                if likes < min_likes:
+                age_days: Optional[float] = None
+
+                # Проверяем наличие обязательных полей
+                required = ["id", "ownerUsername", "caption", "likesCount"]
+                if not all(k in post for k in required):
+                    missing = [k for k in required if k not in post]
+                    logger.debug(
+                        f"Post {shortcode} filtered out: missing required fields {missing}"
+                    )
                     continue
-                
+
+                # Фильтруем по лайкам
+                if likes < min_likes:
+                    logger.debug(
+                        f"Post {shortcode} filtered out: likes={likes} (min={min_likes})"
+                    )
+                    continue
+
                 # Фильтруем по возрасту
                 timestamp = post.get("timestamp")
                 if timestamp:
                     post_date = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    now = datetime.now(post_date.tzinfo) if post_date.tzinfo else datetime.utcnow()
+                    age_days = (now - post_date).days
                     if post_date < cutoff_date:
+                        logger.debug(
+                            f"Post {shortcode} filtered out: age_days={age_days} (max={max_age_days})"
+                        )
                         continue
-                
+                else:
+                    age_days = None
+                    logger.debug(f"Post {shortcode}: no timestamp (passing age check)")
+
                 # Фильтруем по длине текста
                 caption = post.get("caption", "")
                 if len(caption) < min_text_length:
+                    logger.debug(
+                        f"Post {shortcode} filtered out: caption_len={len(caption)} (min={min_text_length})"
+                    )
                     continue
-                
+
                 # Пост прошел все фильтры
+                logger.info(
+                    f"Post {shortcode} passed filter: likes={likes}, age_days={age_days}"
+                )
                 filtered.append(post)
-                
+
             except Exception as e:
                 logger.warning(f"Error filtering post {post.get('id')}: {e}")
                 continue
@@ -294,26 +340,54 @@ class InstagramParser:
         filtered = []
         for post in posts:
             try:
+                shortcode = post.get("shortCode") or post.get("id", "?")
+                likes = post.get("likesCount", 0)
+
                 if not all(k in post for k in ["id", "ownerUsername", "caption", "likesCount"]):
+                    missing = [k for k in ["id", "ownerUsername", "caption", "likesCount"] if k not in post]
+                    logger.debug(f"Post {shortcode} filtered out: missing fields {missing}")
                     continue
                 username = (post.get("ownerUsername") or "").strip().lower()
                 settings = author_settings_map.get(username)
                 if not settings:
-                    logger.debug(f"No settings for @{username}, skipping post")
+                    logger.debug(f"Post {shortcode} filtered out: no settings for @{username}")
                     continue
                 min_likes, max_age_days = settings
                 cutoff_date = datetime.utcnow() - timedelta(days=max_age_days)
-                likes = post.get("likesCount", 0)
+
                 if likes < min_likes:
+                    logger.debug(
+                        f"Post {shortcode} filtered out: likes={likes} (min={min_likes})"
+                    )
                     continue
+
+                age_days: Optional[float] = None
                 timestamp = post.get("timestamp")
                 if timestamp:
                     post_date = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    if post_date.tzinfo:
+                        age_days = (datetime.now(post_date.tzinfo) - post_date).days
+                    else:
+                        age_days = (datetime.utcnow() - post_date).days
                     if post_date < cutoff_date:
+                        logger.debug(
+                            f"Post {shortcode} filtered out: likes={likes} (min={min_likes}), age_days={age_days} (max={max_age_days})"
+                        )
                         continue
+                else:
+                    age_days = None
+                    logger.debug(f"Post {shortcode}: no timestamp (passing age check)")
+
                 caption = post.get("caption", "")
                 if len(caption) < min_text_length:
+                    logger.debug(
+                        f"Post {shortcode} filtered out: caption_len={len(caption)} (min={min_text_length})"
+                    )
                     continue
+
+                logger.info(
+                    f"Post {shortcode} passed filter: likes={likes}, age_days={age_days}"
+                )
                 filtered.append(post)
             except Exception as e:
                 logger.warning(f"Error filtering post {post.get('id')}: {e}")
@@ -355,6 +429,28 @@ class InstagramParser:
             raise ValueError("Apify run did not return defaultDatasetId")
         posts = await self._fetch_items_from_dataset(dataset_id)
         logger.info(f"Fetched {len(posts)} posts from Apify")
+
+        # Логируем сырые данные первых 5 постов для отладки
+        for i, item in enumerate(posts[:5]):
+            shortcode = item.get("shortCode") or item.get("id", "?")
+            likes = item.get("likesCount")
+            ts = item.get("timestamp")
+            owner = item.get("ownerUsername")
+            age_str = "N/A"
+            if ts:
+                try:
+                    post_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    if post_dt.tzinfo:
+                        age_days_val = (datetime.now(post_dt.tzinfo) - post_dt).days
+                    else:
+                        age_days_val = (datetime.utcnow() - post_dt).days
+                    age_str = f"{age_days_val} days"
+                except Exception:
+                    pass
+            logger.debug(
+                f"Raw post {i + 1}: shortcode={shortcode}, likes={likes}, timestamp={ts}, owner={owner}, age={age_str}"
+            )
+
         filtered = self.filter_viral_posts_per_author(
             posts,
             author_settings_map=author_settings_map,

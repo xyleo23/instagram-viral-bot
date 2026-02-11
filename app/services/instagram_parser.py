@@ -61,8 +61,8 @@ class InstagramParser:
     async def parse_accounts(
         self,
         accounts: List[str],
-        min_likes: int = 5000,
-        max_age_days: int = 3,
+        min_likes: Optional[int] = None,
+        max_age_days: Optional[int] = None,
         posts_limit: int = 10
     ) -> List[Dict[str, Any]]:
         """
@@ -70,8 +70,8 @@ class InstagramParser:
 
         Args:
             accounts: Список username'ов или URL для парсинга
-            min_likes: Минимум лайков для фильтра
-            max_age_days: Максимальный возраст поста
+            min_likes: Минимум лайков для фильтра (None — из config/.env)
+            max_age_days: Максимальный возраст поста (None — из config/.env)
             posts_limit: Сколько постов парсить с каждого аккаунта
 
         Returns:
@@ -113,8 +113,9 @@ class InstagramParser:
 
             filtered = await self.filter_viral_posts(
                 posts,
-                min_likes=min_likes,
-                max_age_days=max_age_days
+                min_text_length=getattr(self.settings, "MIN_TEXT_LENGTH", 100),
+                max_age_days=max_age_days if max_age_days is not None else getattr(self.settings, "MAX_POST_AGE_DAYS", 3),
+                min_likes=min_likes if min_likes is not None else getattr(self.settings, "MIN_LIKES", 5000)
             )
             logger.info(f"Filtered to {len(filtered)} viral posts")
             return filtered

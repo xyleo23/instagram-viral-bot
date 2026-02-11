@@ -87,6 +87,8 @@ class InstagramParser:
                 raise ValueError("Apify run did not return defaultDatasetId")
             posts = await self._fetch_items_from_dataset(dataset_id)
             logger.info(f"Fetched {len(posts)} posts from Apify")
+            if posts:
+                logger.debug(f"Full first post JSON: {posts[0]}")
 
             # Логируем сырые данные первых 5 постов для отладки
             for i, item in enumerate(posts[:5]):

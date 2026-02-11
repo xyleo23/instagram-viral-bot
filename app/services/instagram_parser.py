@@ -141,7 +141,8 @@ class InstagramParser:
             raise ValueError("APIFY_INSTAGRAM_ACT_ID and APIFY_TOKEN must be set in settings")
 
         run_input = {
-            "directUrls": accounts,
+            "directUrls": [f"https://www.instagram.com/{username.lstrip('@')}/" for username in accounts],
+            "resultsType": "posts",
             "resultsLimit": posts_limit,
         }
         payload = run_input

@@ -12,6 +12,7 @@ from app.models import (
     ApprovalHistory,
 )
 from sqlalchemy import select, desc
+from sqlalchemy.orm import selectinload
 
 router = Router(name="history")
 config = get_config()
@@ -41,6 +42,7 @@ async def cmd_history(message: Message):
                         ProcessedStatus.POSTED,
                     ])
                 )
+                .options(selectinload(ProcessedPost.original_post))
                 .order_by(desc(ProcessedPost.updated_at))
                 .limit(HISTORY_LIMIT)
             )
@@ -67,10 +69,15 @@ async def cmd_history(message: Message):
                     status_icon = "📤"
                 else:
                     status_icon = "❓"
-                
-                text += f"{status_icon} *{i}. {post.title[:40]}...*\n"
-                text += f"   Автор: @{post.original_post.author}\n"
-                text += f"   Лайки: {post.original_post.likes:,}\n"
+                title = (post.title or "")[:40]
+                if len(post.title or "") > 40:
+                    title += "..."
+                orig = post.original_post
+                author = (orig.author if orig else "") or "?"
+                likes = (orig.likes if orig else 0) or 0
+                text += f"{status_icon} *{i}. {title}*\n"
+                text += f"   Автор: @{author}\n"
+                text += f"   Лайки: {likes:,}\n"
                 text += f"   Статус: {post.status.value}\n"
                 text += f"   Дата: {post.updated_at.strftime('%d.%m.%Y %H:%M')}\n\n"
             
@@ -102,6 +109,7 @@ async def callback_show_history(callback: CallbackQuery):
                         ProcessedStatus.POSTED,
                     ])
                 )
+                .options(selectinload(ProcessedPost.original_post))
                 .order_by(desc(ProcessedPost.updated_at))
                 .limit(HISTORY_LIMIT)
             )
@@ -120,7 +128,6 @@ async def callback_show_history(callback: CallbackQuery):
             text += f"Последние {len(posts)} постов:\n\n"
             
             for i, post in enumerate(posts, start=1):
-                # Определяем иконку статуса
                 if post.status == ProcessedStatus.APPROVED:
                     status_icon = "✅"
                 elif post.status == ProcessedStatus.REJECTED:
@@ -129,10 +136,15 @@ async def callback_show_history(callback: CallbackQuery):
                     status_icon = "📤"
                 else:
                     status_icon = "❓"
-                
-                text += f"{status_icon} *{i}. {post.title[:40]}...*\n"
-                text += f"   Автор: @{post.original_post.author}\n"
-                text += f"   Лайки: {post.original_post.likes:,}\n"
+                title = (post.title or "")[:40]
+                if len(post.title or "") > 40:
+                    title += "..."
+                orig = post.original_post
+                author = (orig.author if orig else "") or "?"
+                likes = (orig.likes if orig else 0) or 0
+                text += f"{status_icon} *{i}. {title}*\n"
+                text += f"   Автор: @{author}\n"
+                text += f"   Лайки: {likes:,}\n"
                 text += f"   Статус: {post.status.value}\n"
                 text += f"   Дата: {post.updated_at.strftime('%d.%m.%Y %H:%M')}\n\n"
             

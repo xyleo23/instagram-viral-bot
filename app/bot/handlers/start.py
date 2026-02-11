@@ -8,6 +8,7 @@ from loguru import logger
 from app.config import get_config
 from app.models import get_session, OriginalPost, ProcessedPost, PostStatus, ProcessedStatus
 from app.bot.keyboards.inline_keyboards import get_main_menu
+from app.services.author_manager import AuthorManager
 from sqlalchemy import select, func
 from datetime import datetime, timedelta
 
@@ -138,6 +139,18 @@ async def cmd_status(message: Message):
             )
             approved_count = approved_result.scalar() or 0
         
+        # Число авторов из БД (добавленных через бота), не из конфига
+        db_authors = await AuthorManager.get_all_authors(config.ADMIN_CHAT_ID)
+        authors_count = len(db_authors) if db_authors else 0
+        active_count = sum(1 for a in (db_authors or []) if a.is_active)
+        # Если в БД нет авторов — показываем конфиг как подсказку
+        if authors_count == 0:
+            min_likes_str = f"{config.MIN_LIKES:,}"
+            max_age_str = f"{config.MAX_POST_AGE_DAYS} дней"
+        else:
+            min_likes_str = "по настройкам авторов"
+            max_age_str = "по настройкам авторов"
+        
         text = f"""
 📊 *Статус системы*
 
@@ -152,9 +165,9 @@ async def cmd_status(message: Message):
 ✅ Одобрено: {approved_count}
 
 *Настройки:*
-👥 Авторов отслеживается: {len(config.instagram_authors_list)}
-❤️ Минимум лайков: {config.MIN_LIKES:,}
-📅 Макс. возраст: {config.MAX_POST_AGE_DAYS} дней
+👥 Авторов отслеживается: {authors_count} (активных: {active_count})
+❤️ Минимум лайков: {min_likes_str}
+📅 Макс. возраст: {max_age_str}
 
 *Система:*
 🤖 Бот: Работает

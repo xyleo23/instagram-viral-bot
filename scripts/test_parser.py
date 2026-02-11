@@ -21,7 +21,7 @@ async def main():
     print(f"❤️  Min likes: {config.MIN_LIKES}")
     print(f"📅 Max age: {config.MAX_POST_AGE_DAYS} days\n")
     
-    parser = InstagramParser(api_key=config.APIFY_API_KEY)
+    parser = InstagramParser(settings=config)
     
     try:
         # Парсим первых 2 авторов для теста

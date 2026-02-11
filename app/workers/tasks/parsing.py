@@ -40,12 +40,11 @@ async def parse_instagram_accounts(self) -> Dict:
         dict: Статистика парсинга
     """
     logger.info("Starting Instagram parsing task")
-    
+
     config = get_config()
     init_db(config.get_database_url())
-    
-    parser = InstagramParser(api_key=config.APIFY_API_KEY)
-    
+    parser = InstagramParser(settings=config)
+
     try:
         # 1. Парсим аккаунты (активные авторы из AuthorSettings с персональными настройками)
         posts = await parser.parse_accounts_with_settings(
@@ -108,9 +107,8 @@ async def parse_specific_account(self, username: str) -> Dict:
     
     config = get_config()
     init_db(config.get_database_url())
-    
-    parser = InstagramParser(api_key=config.APIFY_API_KEY)
-    
+    parser = InstagramParser(settings=config)
+
     try:
         # Настройки для этого автора из БД или конфиг
         author = await AuthorManager.get_author(username)

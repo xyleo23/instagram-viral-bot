@@ -296,9 +296,11 @@ class InstagramParser:
                 timestamp = post.get("timestamp")
                 if timestamp:
                     post_date = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                    now = datetime.now(post_date.tzinfo) if post_date.tzinfo else datetime.utcnow()
-                    age_days = (now - post_date).days
-                    if post_date < cutoff_date:
+                    # Используем naive UTC для сравнения (Instagram отдаёт UTC)
+                    post_date_naive = post_date.replace(tzinfo=None) if post_date.tzinfo else post_date
+                    now = datetime.utcnow()
+                    age_days = (now - post_date_naive).days
+                    if post_date_naive < cutoff_date:
                         logger.debug(
                             f"Post {shortcode} filtered out: age_days={age_days} (max={max_age_days})"
                         )

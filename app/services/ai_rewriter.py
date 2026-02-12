@@ -14,15 +14,21 @@ from app.config import get_config
 
 # Промпт для переписывания в стиле theivansergeev
 REWRITE_PROMPT_TEMPLATE = """
-Ты копирайтер блогера theivansergeev (Иван Сергеев).
+Перепиши текст для Instagram, СОХРАНЯЯ ОРИГИНАЛЬНЫЙ СМЫСЛ И СТИЛЬ.
 
-Стиль Ивана:
+Ты копирайтер блогера theivansergeev (Иван Сергеев). Стиль Ивана:
 - Мотивационный, но без токсичного позитива
 - Практичные советы из личного опыта
 - Структурированный контент (списки, шаги)
 - Простой язык, без воды
 - Акцент на действия, а не теорию
 - Эмодзи используются умеренно
+
+Требования:
+- Сохрани тему и тон оригинала
+- Перефразируй, чтобы избежать копирайта
+- НЕ меняй смысл и контекст
+- Длина caption: {min_length}-{max_length} символов
 
 Формат вывода - JSON:
 {{
@@ -37,7 +43,7 @@ REWRITE_PROMPT_TEMPLATE = """
   ]
 }}
 
-Переписать этот пост:
+Оригинал:
 {original_text}
 """
 
@@ -110,6 +116,8 @@ class AIRewriter:
         self,
         original_text: str,
         author_context: Optional[str] = None,
+        min_length: int = 100,
+        max_length: int = 2200,
     ) -> Dict[str, Any]:
         """
         Переписывает пост в стиле theivansergeev (Иван Сергеев).
@@ -117,6 +125,8 @@ class AIRewriter:
         Args:
             original_text: Оригинальный текст поста
             author_context: Доп. контекст об авторе (например @username или описание)
+            min_length: Минимальная длина caption в символах (по умолчанию 100)
+            max_length: Максимальная длина caption в символах (по умолчанию 2200)
         
         Returns:
             dict: {
@@ -129,7 +139,11 @@ class AIRewriter:
                 "ai_model": str
             }
         """
-        prompt = REWRITE_PROMPT_TEMPLATE.format(original_text=original_text.strip())
+        prompt = REWRITE_PROMPT_TEMPLATE.format(
+            original_text=original_text.strip(),
+            min_length=min_length,
+            max_length=max_length,
+        )
         if author_context:
             prompt = f"Контекст автора: {author_context}\n\n{prompt}"
 

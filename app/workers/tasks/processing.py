@@ -59,7 +59,7 @@ async def process_pending_posts(self) -> Dict:
         logger.info("No pending posts to process")
         return {"status": "success", "processed": 0}
     
-    logger.info(f"Found {len(posts)} posts to process")
+    logger.info("Found %s posts to process", len(posts))
     
     # Обрабатываем каждый пост
     processed_count = 0
@@ -72,7 +72,7 @@ async def process_pending_posts(self) -> Dict:
             )
             processed_count += 1
         except Exception as e:
-            logger.error(f"Error queuing post {post.id}: {e}")
+            logger.error("Error queuing post %s: %s", post.id, e)
     
     return {
         "status": "success",
@@ -98,7 +98,7 @@ async def process_single_post(self, post_id: int) -> Dict:
     Returns:
         dict: Результат обработки
     """
-    logger.info(f"Processing post {post_id}")
+    logger.info("Processing post %s", post_id)
     
     config = get_config()
     init_db(config.get_database_url())
@@ -111,11 +111,11 @@ async def process_single_post(self, post_id: int) -> Dict:
         post = result.scalar_one_or_none()
     
     if not post:
-        logger.error(f"Post {post_id} not found")
+        logger.error("Post %s not found", post_id)
         return {"status": "error", "message": "Post not found"}
     
     if post.status != PostStatus.FILTERED:
-        logger.warning(f"Post {post_id} already processed (status: {post.status})")
+        logger.warning("Post %s already processed (status: %s)", post_id, post.status)
         return {"status": "skipped", "reason": "Already processed"}
     
     # Обновляем статус
@@ -124,7 +124,7 @@ async def process_single_post(self, post_id: int) -> Dict:
         session.add(post)
         await session.commit()
     
-    logger.info(f"Processing: @{post.author}, {post.likes} likes")
+    logger.info("Processing: @%s, %s likes", post.author, post.likes)
     
     try:
         # 2. AI Rewrite
@@ -143,7 +143,7 @@ async def process_single_post(self, post_id: int) -> Dict:
         )
         await rewriter.close()
         
-        logger.info(f"AI rewrite done: {ai_result['tokens_used']} tokens, ${ai_result['cost_usd']:.4f}")
+        logger.info("AI rewrite done: %s tokens, $%.4f", ai_result['tokens_used'], ai_result['cost_usd'])
         
         # 3. Generate carousel images
         logger.info("Step 2/3: Generating carousel images...")
@@ -156,7 +156,7 @@ async def process_single_post(self, post_id: int) -> Dict:
         )
         await generator.close()
         
-        logger.info(f"Generated {len(images)} images")
+        logger.info("Generated %s images", len(images))
         
         # 4. Upload to Yandex.Disk
         logger.info("Step 3/3: Uploading to Yandex.Disk...")
@@ -168,7 +168,7 @@ async def process_single_post(self, post_id: int) -> Dict:
         )
         await uploader.close()
         
-        logger.info(f"Uploaded to: {upload_result['folder_url']}")
+        logger.info("Uploaded to: %s", upload_result['folder_url'])
         
         # 5. Сохраняем ProcessedPost в БД
         async with get_session() as session:
@@ -196,7 +196,7 @@ async def process_single_post(self, post_id: int) -> Dict:
             await session.commit()
             await session.refresh(processed_post)
         
-        logger.info(f"Post {post_id} processed successfully -> ProcessedPost {processed_post.id}")
+        logger.info("Post %s processed successfully -> ProcessedPost %s", post_id, processed_post.id)
         
         # 6. Отправляем уведомление в Telegram
         from aiogram import Bot
@@ -205,9 +205,9 @@ async def process_single_post(self, post_id: int) -> Dict:
         bot = Bot(token=config.BOT_TOKEN)
         try:
             await send_post_for_approval(bot, processed_post.id)
-            logger.info(f"Approval notification sent for post {processed_post.id}")
+            logger.info("Approval notification sent for post %s", processed_post.id)
         except Exception as e:
-            logger.error(f"Error sending approval notification: {e}")
+            logger.error("Error sending approval notification: %s", e)
         finally:
             await bot.session.close()
         
@@ -220,7 +220,7 @@ async def process_single_post(self, post_id: int) -> Dict:
         }
         
     except Exception as e:
-        logger.error(f"Error processing post {post_id}: {e}")
+        logger.error("Error processing post %s: %s", post_id, e)
         
         # Откатываем статус
         async with get_session() as session:

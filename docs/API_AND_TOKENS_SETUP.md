@@ -17,9 +17,9 @@
 
 | Переменная | Назначение | Где взять |
 |------------|------------|-----------|
-| **APIFY_API_KEY** | Парсинг Instagram (посты, лайки, авторы) | [Apify](https://apify.com) → Sign up → Settings → Integrations → API Token. В проекте используется актор `apify/instagram-scraper`. |
+| **SCRAPECREATORS_API_KEY** | Парсинг Instagram (посты, лайки, авторы) | [ScrapeCreators](https://scrapecreators.com) → Sign up → Личный кабинет → API Key. 100 бесплатных запросов при регистрации. |
 
-Без **APIFY_API_KEY** команда `/parse` и фоновый парсинг по расписанию не будут работать.
+Без **SCRAPECREATORS_API_KEY** команда `/parse` и фоновый парсинг по расписанию не будут работать.
 
 ---
 
@@ -40,7 +40,7 @@
 - **ADMIN_CHAT_ID** — проверка в хендлерах (`start.py`, `queue.py`, `approval.py`, `history.py`): ответ только тебе.
 - **OPENROUTER_API_KEY** — `app.services.ai_rewriter`, задача `app.workers.tasks.processing` (переписывание текста).
 - **ORSHOT_API_KEY** — `app.services.carousel_generator`, задача processing (генерация картинок карусели).
-- **APIFY_API_KEY** — `app.services.instagram_parser`, задача `app.workers.tasks.parsing` и команда `/parse`.
+- **SCRAPECREATORS_API_KEY** — `app.services.instagram_parser`, задача `app.workers.tasks.parsing` и команда `/parse`.
 - **YANDEX_DISK_TOKEN** — `app.services.yandex_disk`, задача processing (загрузка изображений на Диск).
 
 ---
@@ -54,8 +54,8 @@ BOT_TOKEN=123456:ABC...
 ADMIN_CHAT_ID=123456789
 OPENROUTER_API_KEY=sk-or-...
 ORSHOT_API_KEY=ваш_ключ_orshot
-APIFY_API_KEY=
+SCRAPECREATORS_API_KEY=
 YANDEX_DISK_TOKEN=
 ```
 
-Для полного цикла (парсинг → AI → карусель → Диск → одобрение) заполни также **APIFY_API_KEY** и **YANDEX_DISK_TOKEN**.
+Для полного цикла (парсинг → AI → карусель → Диск → одобрение) заполни также **SCRAPECREATORS_API_KEY** и **YANDEX_DISK_TOKEN**.

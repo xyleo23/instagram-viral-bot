@@ -58,17 +58,9 @@ class Config(BaseSettings):
         default="",
         description="Yandex.Disk OAuth Token",
     )
-    APIFY_API_KEY: str = Field(
-        default="",
-        description="Apify API Key for Instagram parsing (deprecated, use APIFY_TOKEN)",
-    )
-    APIFY_TOKEN: str = Field(
-        default="",
-        description="Apify API Token for Instagram parsing (acts)",
-    )
-    APIFY_INSTAGRAM_ACT_ID: str = Field(
-        default="",
-        description="Apify Actor ID for Instagram scraper (e.g. culc72xb7MP3EbaeX)",
+    SCRAPECREATORS_API_KEY: str = Field(
+        ...,
+        description="ScrapeCreators API Key for Instagram parsing",
     )
 
     # ==================== INSTAGRAM PUBLISHING ====================

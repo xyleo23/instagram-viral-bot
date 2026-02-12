@@ -62,7 +62,7 @@ async def cmd_parse(message: Message) -> None:
     except Exception as e:
         log.exception(f"Ошибка в cmd_parse для @{username}: {e}")
         await message.answer(
-            f"❌ Ошибка при парсинге: {e!s}\n\nПроверьте username и настройки Apify."
+            f"❌ Ошибка при парсинге: {e!s}\n\nПроверьте username и настройки ScrapeCreators API."
         )
     finally:
         await parser.close()

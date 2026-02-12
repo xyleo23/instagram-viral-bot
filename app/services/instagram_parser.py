@@ -1,12 +1,11 @@
 """
-Сервис парсинга Instagram через Apify API.
+Сервис парсинга Instagram через ScrapeCreators API.
 """
 import asyncio
 from typing import List, Dict, Optional, Any, Tuple
 from datetime import datetime, timedelta
 import aiohttp
 from loguru import logger
-import json
 
 from app.config import get_config, Config
 from app.models import OriginalPost, PostStatus, get_session
@@ -15,22 +14,8 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 
-def _normalize_start_urls(accounts: List[str]) -> List[str]:
-    """Преобразует список username или URL в список startUrls."""
-    urls = []
-    for acc in accounts:
-        acc = (acc or "").strip()
-        if not acc:
-            continue
-        if acc.startswith("http://") or acc.startswith("https://"):
-            urls.append(acc)
-        else:
-            urls.append(f"https://www.instagram.com/{acc}/")
-    return urls
-
-
 class InstagramParser:
-    """Сервис парсинга Instagram через Apify API."""
+    """Сервис парсинга Instagram через ScrapeCreators API."""
 
     def __init__(self, settings: Optional[Config] = None):
         """
@@ -40,23 +25,6 @@ class InstagramParser:
             settings: Конфигурация (если None — используется get_config()).
         """
         self.settings = settings or get_config()
-        self._token = getattr(self.settings, "APIFY_TOKEN", None) or getattr(
-            self.settings, "APIFY_API_KEY", ""
-        )
-        self._act_id = getattr(self.settings, "APIFY_INSTAGRAM_ACT_ID", "") or ""
-        self._session: Optional[aiohttp.ClientSession] = None
-
-    async def _get_session(self) -> aiohttp.ClientSession:
-        """Получает или создает HTTP сессию."""
-        if self._session is None or self._session.closed:
-            timeout = aiohttp.ClientTimeout(total=300)
-            self._session = aiohttp.ClientSession(timeout=timeout)
-        return self._session
-
-    async def close(self):
-        """Закрывает HTTP сессию."""
-        if self._session and not self._session.closed:
-            await self._session.close()
 
     async def parse_accounts(
         self,
@@ -66,7 +34,7 @@ class InstagramParser:
         posts_limit: int = 10
     ) -> List[Dict[str, Any]]:
         """
-        Парсит Instagram аккаунты через Apify.
+        Парсит Instagram аккаунты через ScrapeCreators API.
 
         Args:
             accounts: Список username'ов или URL для парсинга
@@ -80,39 +48,23 @@ class InstagramParser:
         logger.info(f"Starting Instagram parsing for {len(accounts)} accounts")
 
         try:
-            run_id = await self._start_apify_run(accounts, posts_limit)
-            run_info = await self._wait_for_apify_run(run_id)
-            dataset_id = run_info.get("data", {}).get("defaultDatasetId") or run_info.get("defaultDatasetId")
-            if not dataset_id:
-                raise ValueError("Apify run did not return defaultDatasetId")
-            posts = await self._fetch_items_from_dataset(dataset_id)
-            logger.info(f"Fetched {len(posts)} posts from Apify")
-            if posts:
-                logger.debug(f"Full first post JSON: {posts[0]}")
+            all_posts = []
+            for username in accounts:
+                try:
+                    clean_username = (username or "").strip().lstrip("@")
+                    if not clean_username:
+                        continue
+                    if clean_username.startswith("http://") or clean_username.startswith("https://"):
+                        clean_username = clean_username.rstrip("/").split("/")[-1] or clean_username
+                    posts = await self._fetch_profile_posts(clean_username, posts_limit)
+                    all_posts.extend(posts)
+                except Exception as e:
+                    logger.error(f"Error parsing @{username}: {e}")
 
-            # Логируем сырые данные первых 5 постов для отладки
-            for i, item in enumerate(posts[:5]):
-                shortcode = item.get("shortCode") or item.get("id", "?")
-                likes = item.get("likesCount")
-                ts = item.get("timestamp")
-                owner = item.get("ownerUsername")
-                age_str = "N/A"
-                if ts:
-                    try:
-                        post_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                        if post_dt.tzinfo:
-                            age_days_val = (datetime.now(post_dt.tzinfo) - post_dt).days
-                        else:
-                            age_days_val = (datetime.utcnow() - post_dt).days
-                        age_str = f"{age_days_val} days"
-                    except Exception:
-                        pass
-                logger.debug(
-                    f"Raw post {i + 1}: shortcode={shortcode}, likes={likes}, timestamp={ts}, owner={owner}, age={age_str}"
-                )
+            logger.info(f"Fetched {len(all_posts)} posts from ScrapeCreators")
 
-            filtered = await self.filter_viral_posts(
-                posts,
+            filtered = self.filter_viral_posts(
+                all_posts,
                 min_text_length=getattr(self.settings, "MIN_TEXT_LENGTH", 100),
                 max_age_days=max_age_days if max_age_days is not None else getattr(self.settings, "MAX_POST_AGE_DAYS", 3),
                 min_likes=min_likes if min_likes is not None else getattr(self.settings, "MIN_LIKES", 5000)
@@ -124,132 +76,74 @@ class InstagramParser:
             logger.error(f"Error parsing Instagram: {e}")
             raise
 
-    async def _start_apify_run(
-        self,
-        accounts: List[str],
-        posts_limit: int
-    ) -> str:
-        """
-        Запускает Apify акт по URL:
-        https://api.apify.com/v2/acts/{ACT_ID}/runs?token={TOKEN}
+    async def _fetch_profile_posts(
+        self, username: str, limit: int = 5
+    ) -> List[Dict[str, Any]]:
+        """Получить посты профиля через ScrapeCreators."""
+        url = "https://api.scrapecreators.com/v1/instagram/profile"
+        headers = {"x-api-key": self.settings.SCRAPECREATORS_API_KEY}
+        params = {"handle": username.replace("@", "")}
 
-        Returns:
-            Run ID
-        """
-        act_id = self._act_id
-        token = self._token
-        if not act_id or not token:
-            raise ValueError("APIFY_INSTAGRAM_ACT_ID and APIFY_TOKEN must be set in settings")
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers, params=params, timeout=30) as resp:
+                resp.raise_for_status()
+                data = await resp.json()
 
-        run_input = {
-            "directUrls": [f"https://www.instagram.com/{username.lstrip('@')}/" for username in accounts],
-            "resultsType": "posts",
-            "resultsLimit": posts_limit,
-        }
-        payload = run_input
-        url = f"https://api.apify.com/v2/acts/{act_id}/runs?token={token}"
+                if not data.get("success"):
+                    raise Exception(f"API error: {data}")
 
-        logger.info(f"Starting Apify run for {len(accounts)} accounts via {act_id}")
+                # Извлечь посты из edge_felix_video_timeline (видео)
+                posts_data = (
+                    data.get("data", {})
+                    .get("edge_felix_video_timeline", {})
+                    .get("edges", [])
+                )
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.post(url, json=payload) as resp:
-                    if resp.status not in (200, 201):
-                        body = await resp.text()
-                        logger.error(f"Apify start run failed: status={resp.status}, url={url}, body={body}")
-                        resp.raise_for_status()
-                    data = await resp.json()
-            run_id = (data.get("data") or {}).get("id") or data.get("id")
-            if not run_id:
-                logger.error(f"Apify response missing run id: {data}")
-                raise ValueError("Apify response missing run id")
-            logger.info(f"Apify run started: run_id={run_id}")
-            return str(run_id)
-        except aiohttp.ClientError as e:
-            logger.exception(f"Apify request error: url={url}, payload={payload}, error={e}")
-            raise
-        except Exception as e:
-            logger.exception(f"Apify start run error: url={url}, payload={payload}, error={e}")
-            raise
+                # Дополнительно: edge_owner_to_timeline_media (фото + видео)
+                if not posts_data:
+                    posts_data = (
+                        data.get("data", {})
+                        .get("edge_owner_to_timeline_media", {})
+                        .get("edges", [])
+                    )
 
-    async def _wait_for_apify_run(
-        self,
-        run_id: str,
-        max_wait: int = 300,
-        poll_interval: int = 5
-    ) -> Dict[str, Any]:
-        """
-        Ждет завершения Apify run.
-        URL: https://api.apify.com/v2/acts/{act_id}/runs/{run_id}?token={token}
+                posts = []
+                for edge in posts_data[:limit]:
+                    node = edge.get("node", {})
 
-        Returns:
-            Полный ответ run (для получения defaultDatasetId).
-        """
-        act_id = self._act_id
-        token = self._token
-        url = f"https://api.apify.com/v2/acts/{act_id}/runs/{run_id}?token={token}"
+                    # Извлечь caption
+                    caption_edges = node.get("edge_media_to_caption", {}).get("edges", [])
+                    if caption_edges:
+                        caption = caption_edges[0].get("node", {}).get("text", "")
+                    else:
+                        caption = ""
 
-        start_time = datetime.now()
-        last_data: Dict[str, Any] = {}
+                    shortcode = node.get("shortcode") or node.get("id", "")
+                    taken_at = node.get("taken_at_timestamp")
+                    if taken_at:
+                        timestamp_str = datetime.utcfromtimestamp(taken_at).strftime("%Y-%m-%dT%H:%M:%S+00:00")
+                    else:
+                        timestamp_str = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")
 
-        try:
-            async with aiohttp.ClientSession() as session:
-                while True:
-                    if (datetime.now() - start_time).total_seconds() > max_wait:
-                        raise TimeoutError(f"Apify run {run_id} timeout after {max_wait}s")
+                    post = {
+                        "id": shortcode,
+                        "shortCode": shortcode,
+                        "ownerUsername": username,
+                        "caption": caption,
+                        "likesCount": node.get("edge_liked_by", {}).get("count", 0),
+                        "commentsCount": node.get("edge_media_to_comment", {}).get("count", 0),
+                        "timestamp": timestamp_str,
+                        "url": f"https://www.instagram.com/p/{shortcode}/",
+                        "is_video": node.get("is_video", False),
+                        "display_url": node.get("display_url"),
+                        "video_url": node.get("video_url") if node.get("is_video") else None,
+                    }
+                    posts.append(post)
 
-                    async with session.get(url) as resp:
-                        if resp.status != 200:
-                            body = await resp.text()
-                            logger.error(f"Apify run status failed: status={resp.status}, url={url}, body={body}")
-                            resp.raise_for_status()
-                        data = await resp.json()
-                    last_data = data
-                    status = (data.get("data") or {}).get("status") or data.get("status", "")
+                logger.info(f"Fetched {len(posts)} posts from @{username}")
+                return posts
 
-                    logger.debug(f"Apify run {run_id} status: {status}")
-
-                    if status == "SUCCEEDED":
-                        logger.info(f"Apify run {run_id} succeeded")
-                        return data
-                    if status in ("FAILED", "ABORTED", "TIMED-OUT", "TIMED_OUT"):
-                        raise Exception(f"Apify run {run_id} failed with status: {status}")
-
-                    await asyncio.sleep(poll_interval)
-        except aiohttp.ClientError as e:
-            logger.exception(f"Apify wait run request error: url={url}, error={e}")
-            raise
-
-    async def _fetch_items_from_dataset(self, dataset_id: str) -> List[Dict[str, Any]]:
-        """
-        Получает элементы датасета по ID.
-        GET https://api.apify.com/v2/datasets/{dataset_id}/items?token={token}
-        """
-        token = self._token
-        url = f"https://api.apify.com/v2/datasets/{dataset_id}/items?token={token}"
-
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as resp:
-                    resp.raise_for_status()
-                    items = await resp.json()
-            logger.info(f"Fetched {len(items)} items from dataset {dataset_id}")
-            return items if isinstance(items, list) else list(items)
-        except aiohttp.ClientError as e:
-            logger.exception(f"Apify dataset fetch error: url={url}, error={e}")
-            raise
-
-    async def _get_results(self, run_id: str) -> List[Dict[str, Any]]:
-        """
-        Получает результаты Apify run через defaultDatasetId (для обратной совместимости).
-        """
-        run_info = await self._wait_for_apify_run(run_id)
-        dataset_id = run_info.get("data", {}).get("defaultDatasetId") or run_info.get("defaultDatasetId")
-        if not dataset_id:
-            raise ValueError("Apify run did not return defaultDatasetId")
-        return await self._fetch_items_from_dataset(dataset_id)
-    
-    async def filter_viral_posts(
+    def filter_viral_posts(
         self,
         posts: List[Dict[str, Any]],
         min_likes: int = 5000,
@@ -258,13 +152,13 @@ class InstagramParser:
     ) -> List[Dict[str, Any]]:
         """
         Фильтрует только вирусные посты.
-        
+
         Args:
             posts: Список постов
             min_likes: Минимум лайков
             max_age_days: Максимальный возраст
             min_text_length: Минимальная длина текста
-        
+
         Returns:
             Отфильтрованные посты, отсортированные по лайкам
         """
@@ -277,7 +171,6 @@ class InstagramParser:
                 likes = post.get("likesCount", 0)
                 age_days: Optional[float] = None
 
-                # Проверяем наличие обязательных полей
                 required = ["id", "ownerUsername", "caption", "likesCount"]
                 if not all(k in post for k in required):
                     missing = [k for k in required if k not in post]
@@ -286,18 +179,15 @@ class InstagramParser:
                     )
                     continue
 
-                # Фильтруем по лайкам
                 if likes < min_likes:
                     logger.debug(
                         f"Post {shortcode} filtered out: likes={likes} (min={min_likes})"
                     )
                     continue
 
-                # Фильтруем по возрасту
                 timestamp = post.get("timestamp")
                 if timestamp:
                     post_date = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
-                    # Используем naive UTC для сравнения (Instagram отдаёт UTC)
                     post_date_naive = post_date.replace(tzinfo=None) if post_date.tzinfo else post_date
                     now = datetime.utcnow()
                     age_days = (now - post_date_naive).days
@@ -310,7 +200,6 @@ class InstagramParser:
                     age_days = None
                     logger.debug(f"Post {shortcode}: no timestamp (passing age check)")
 
-                # Фильтруем по длине текста
                 caption = post.get("caption", "")
                 if len(caption) < min_text_length:
                     logger.debug(
@@ -318,7 +207,6 @@ class InstagramParser:
                     )
                     continue
 
-                # Пост прошел все фильтры
                 logger.info(
                     f"Post {shortcode} passed filter: likes={likes}, age_days={age_days}"
                 )
@@ -327,10 +215,8 @@ class InstagramParser:
             except Exception as e:
                 logger.warning(f"Error filtering post {post.get('id')}: {e}")
                 continue
-        
-        # Сортируем по лайкам (по убыванию)
+
         filtered.sort(key=lambda x: x.get("likesCount", 0), reverse=True)
-        
         return filtered
 
     def filter_viral_posts_per_author(
@@ -371,13 +257,14 @@ class InstagramParser:
                 timestamp = post.get("timestamp")
                 if timestamp:
                     post_date = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                    post_date_naive = post_date.replace(tzinfo=None) if post_date.tzinfo else post_date
                     if post_date.tzinfo:
                         age_days = (datetime.now(post_date.tzinfo) - post_date).days
                     else:
                         age_days = (datetime.utcnow() - post_date).days
-                    if post_date < cutoff_date:
+                    if post_date_naive < cutoff_date:
                         logger.debug(
-                            f"Post {shortcode} filtered out: likes={likes} (min={min_likes}), age_days={age_days} (max={max_age_days})"
+                            f"Post {shortcode} filtered out: age_days={age_days} (max={max_age_days})"
                         )
                         continue
                 else:
@@ -428,37 +315,22 @@ class InstagramParser:
             a.username: (a.min_likes, a.max_post_age_days) for a in authors
         }
         logger.info(f"Parsing {len(accounts)} active authors with per-author settings")
-        run_id = await self._start_apify_run(accounts, posts_limit)
-        run_info = await self._wait_for_apify_run(run_id)
-        dataset_id = run_info.get("data", {}).get("defaultDatasetId") or run_info.get("defaultDatasetId")
-        if not dataset_id:
-            raise ValueError("Apify run did not return defaultDatasetId")
-        posts = await self._fetch_items_from_dataset(dataset_id)
-        logger.info(f"Fetched {len(posts)} posts from Apify")
 
-        # Логируем сырые данные первых 5 постов для отладки
-        for i, item in enumerate(posts[:5]):
-            shortcode = item.get("shortCode") or item.get("id", "?")
-            likes = item.get("likesCount")
-            ts = item.get("timestamp")
-            owner = item.get("ownerUsername")
-            age_str = "N/A"
-            if ts:
-                try:
-                    post_dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-                    if post_dt.tzinfo:
-                        age_days_val = (datetime.now(post_dt.tzinfo) - post_dt).days
-                    else:
-                        age_days_val = (datetime.utcnow() - post_dt).days
-                    age_str = f"{age_days_val} days"
-                except Exception:
-                    pass
-            logger.debug(
-                f"Raw post {i + 1}: shortcode={shortcode}, likes={likes}, timestamp={ts}, owner={owner}, age={age_str}"
-            )
+        all_posts = []
+        for username in accounts:
+            try:
+                clean_username = (username or "").strip().lstrip("@")
+                if not clean_username:
+                    continue
+                posts = await self._fetch_profile_posts(clean_username, posts_limit)
+                all_posts.extend(posts)
+            except Exception as e:
+                logger.error(f"Error parsing @{username}: {e}")
+
+        logger.info(f"Fetched {len(all_posts)} posts from ScrapeCreators")
 
         filtered = self.filter_viral_posts_per_author(
-            posts,
+            all_posts,
             author_settings_map=author_settings_map,
             min_text_length=config.MIN_TEXT_LENGTH,
         )
@@ -472,55 +344,58 @@ class InstagramParser:
     ) -> List[OriginalPost]:
         """
         Сохраняет посты в БД.
-        
+
         Args:
             posts: Список постов
             status: Начальный статус
-        
+
         Returns:
             Список сохраненных моделей
         """
         saved_posts = []
-        
+
         async with get_session() as session:
             for post_data in posts:
                 try:
-                    # Проверяем существование по external_id
-                    external_id = post_data["id"]
-                    
+                    external_id = post_data.get("id") or post_data.get("shortCode", "")
+                    if not external_id:
+                        continue
+
                     result = await session.execute(
                         select(OriginalPost).where(OriginalPost.external_id == external_id)
                     )
                     existing = result.scalar_one_or_none()
-                    
+
                     if existing:
                         logger.debug(f"Post {external_id} already exists, skipping")
                         continue
-                    
-                    # Парсим дату
+
                     timestamp = post_data.get("timestamp")
-                    posted_at = datetime.fromisoformat(timestamp.replace("Z", "+00:00")) if timestamp else datetime.utcnow()
-                    
-                    # Создаем новый пост
+                    posted_at = (
+                        datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+                        if timestamp
+                        else datetime.utcnow()
+                    )
+
                     new_post = OriginalPost(
                         external_id=external_id,
                         author=post_data["ownerUsername"],
                         author_url=f"https://www.instagram.com/{post_data['ownerUsername']}/",
-                        text=post_data.get("caption", ""),
-                        likes=post_data.get("likesCount", 0),
-                        comments=post_data.get("commentsCount", 0),
-                        engagement=0.0,  # TODO: посчитать если есть данные о подписчиках
+                        text=post_data.get("caption", post_data.get("text", "")),
+                        likes=post_data.get("likesCount", post_data.get("likes", 0)),
+                        comments=post_data.get("commentsCount", post_data.get("comments", 0)),
+                        engagement=0.0,
                         post_url=post_data.get("url", f"https://www.instagram.com/p/{external_id}/"),
                         posted_at=posted_at,
                         status=status
                     )
-                    
+
                     session.add(new_post)
                     await session.flush()
-                    
+
                     saved_posts.append(new_post)
                     logger.info(f"Saved post {external_id} from @{new_post.author}")
-                    
+
                 except IntegrityError:
                     logger.warning(f"Duplicate post {post_data.get('id')}, skipping")
                     await session.rollback()
@@ -529,9 +404,9 @@ class InstagramParser:
                     logger.error(f"Error saving post {post_data.get('id')}: {e}")
                     await session.rollback()
                     continue
-            
+
             await session.commit()
-        
+
         logger.info(f"Saved {len(saved_posts)} new posts to database")
         return saved_posts
 
@@ -542,29 +417,26 @@ async def main():
     """Пример использования."""
     config = get_config()
     parser = InstagramParser(settings=config)
-    
+
     try:
-        # Парсинг
         posts = await parser.parse_accounts(
-            accounts=config.instagram_authors_list[:3],  # Первые 3 автора для теста
+            accounts=config.instagram_authors_list[:3],
             min_likes=config.MIN_LIKES,
             max_age_days=config.MAX_POST_AGE_DAYS,
             posts_limit=5
         )
-        
+
         print(f"\n✅ Found {len(posts)} viral posts")
-        
-        # Сохранение в БД
+
         saved = await parser.save_to_db(posts)
         print(f"💾 Saved {len(saved)} posts to database")
-        
-        # Вывод
+
         for post in saved[:3]:
             print(f"\n📝 @{post.author}: {post.likes} likes")
             print(f"   {post.text[:100]}...")
-        
+
     finally:
-        await parser.close()
+        pass
 
 
 if __name__ == "__main__":

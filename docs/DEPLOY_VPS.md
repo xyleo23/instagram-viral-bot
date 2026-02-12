@@ -84,7 +84,7 @@ cd ~/instagram_bot
 nano .env
 ```
 
-Обязательные переменные: `BOT_TOKEN`, `ADMIN_CHAT_ID`, `OPENROUTER_API_KEY`, `ORSHOT_API_KEY`, `APIFY_API_KEY`. Остальное можно скопировать из `.env.example`.
+Обязательные переменные: `BOT_TOKEN`, `ADMIN_CHAT_ID`, `OPENROUTER_API_KEY`, `ORSHOT_API_KEY`, `SCRAPECREATORS_API_KEY`. Остальное можно скопировать из `.env.example`.
 
 Для работы с Docker **не нужно** менять `DATABASE_URL` и `REDIS_URL` — они переопределяются в `docker-compose.yml` для контейнеров.
 

@@ -22,7 +22,7 @@ DATABASE_URL=postgresql+asyncpg://instagram_bot:password@localhost:5432/instagra
 REDIS_URL=redis://localhost:6379/0
 
 # API Keys
-APIFY_API_KEY=your_apify_key
+SCRAPECREATORS_API_KEY=your_scrapecreators_key
 OPENROUTER_API_KEY=your_openrouter_key
 ORSHOT_API_KEY=your_orshot_key
 YANDEX_DISK_TOKEN=your_yandex_token

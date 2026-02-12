@@ -2,15 +2,15 @@
 
 ## 📦 Созданные файлы
 
-### 1. `app/services/instagram_parser.py` (~350 строк)
+### 1. `app/services/instagram_parser.py` (~420 строк)
 
-Полнофункциональный асинхронный парсер Instagram через Apify API.
+Полнофункциональный асинхронный парсер Instagram через ScrapeCreators API.
 
 **Основные возможности:**
 
 - ✅ Асинхронный класс `InstagramParser`
-- ✅ Интеграция с Apify Instagram Scraper
-- ✅ Автоматическое ожидание завершения задач Apify
+- ✅ Интеграция с ScrapeCreators API
+- ✅ Прямой запрос к API (без ожидания задач)
 - ✅ Фильтрация вирусных постов по критериям:
   - Минимальное количество лайков
   - Максимальный возраст поста
@@ -32,7 +32,7 @@ posts = await parser.parse_accounts(
 )
 
 # Фильтрация вирусных постов
-filtered = await parser.filter_viral_posts(
+filtered = parser.filter_viral_posts(
     posts,
     min_likes=5000,
     max_age_days=3,
@@ -62,8 +62,8 @@ saved = await parser.save_to_db(posts, status=PostStatus.FILTERED)
 Убедитесь, что в `.env` файле заполнены:
 
 ```env
-# Apify API
-APIFY_API_KEY=your_apify_api_key_here
+# ScrapeCreators API
+SCRAPECREATORS_API_KEY=your_scrapecreators_api_key
 
 # Instagram авторы
 INSTAGRAM_AUTHORS=sanyaagainst,theivansergeev,ivan.loginov_ai
@@ -74,14 +74,12 @@ MAX_POST_AGE_DAYS=3
 MIN_TEXT_LENGTH=100
 ```
 
-### 2. Получите Apify API ключ
+### 2. Получите ScrapeCreators API ключ
 
-Если у вас еще нет аккаунта Apify:
-
-1. Зарегистрируйтесь на https://apify.com/
-2. Получите бесплатные $5 кредитов (~1000 запросов)
-3. Скопируйте API ключ из Settings → Integrations
-4. Добавьте в `.env` файл
+1. Зарегистрируйтесь на https://scrapecreators.com
+2. Получите API ключ в личном кабинете
+3. Добавьте в `.env` файл
+4. 100 бесплатных запросов при регистрации
 
 ### 3. Запустите тест
 
@@ -126,27 +124,27 @@ from app.config import get_config
 @router.message(Command("parse"))
 async def cmd_parse(message: Message):
     config = get_config()
-    parser = InstagramParser(api_key=config.APIFY_API_KEY)
-    
+    parser = InstagramParser(settings=config)
+
     try:
         await message.answer("🔍 Начинаю парсинг Instagram...")
-        
+
         posts = await parser.parse_accounts(
             accounts=config.instagram_authors_list,
             min_likes=config.MIN_LIKES,
             max_age_days=config.MAX_POST_AGE_DAYS,
             posts_limit=10
         )
-        
+
         saved = await parser.save_to_db(posts)
-        
+
         await message.answer(
             f"✅ Парсинг завершен!\n"
             f"📊 Найдено {len(posts)} вирусных постов\n"
             f"💾 Сохранено {len(saved)} новых постов"
         )
     finally:
-        await parser.close()
+        pass
 ```
 
 ### В scheduler'е (автоматический парсинг)
@@ -158,8 +156,8 @@ from app.config import get_config
 async def scheduled_parse():
     """Автоматический парсинг каждые 6 часов."""
     config = get_config()
-    parser = InstagramParser(api_key=config.APIFY_API_KEY)
-    
+    parser = InstagramParser(settings=config)
+
     try:
         posts = await parser.parse_accounts(
             accounts=config.instagram_authors_list,
@@ -167,27 +165,44 @@ async def scheduled_parse():
             max_age_days=config.MAX_POST_AGE_DAYS,
             posts_limit=10
         )
-        
+
         saved = await parser.save_to_db(posts)
         logger.info(f"Scheduled parse: {len(saved)} new posts saved")
     finally:
-        await parser.close()
+        pass
 ```
 
-## 📊 Структура данных Apify
+## 📊 ScrapeCreators API
 
-Apify Instagram Scraper возвращает посты в формате:
+**Base URL:** `https://api.scrapecreators.com/v1`
+
+**Endpoint:** `GET /instagram/profile?handle=username`
+
+**Auth:** Header `x-api-key: YOUR_API_KEY`
+
+**Ответ:** JSON с постами в `data.edge_felix_video_timeline.edges` или `data.edge_owner_to_timeline_media.edges`
 
 ```json
 {
-  "id": "ABC123",
-  "ownerUsername": "sanyaagainst",
-  "caption": "Полный текст поста...",
-  "likesCount": 12450,
-  "commentsCount": 234,
-  "timestamp": "2026-01-29T14:30:00.000Z",
-  "url": "https://www.instagram.com/p/ABC123/",
-  "type": "Image"
+  "success": true,
+  "data": {
+    "edge_felix_video_timeline": {
+      "edges": [
+        {
+          "node": {
+            "shortcode": "ABC123",
+            "edge_media_to_caption": {"edges": [{"node": {"text": "..."}}]},
+            "edge_liked_by": {"count": 12450},
+            "edge_media_to_comment": {"count": 234},
+            "taken_at_timestamp": 1706538600,
+            "is_video": true,
+            "display_url": "...",
+            "video_url": "..."
+          }
+        }
+      ]
+    }
+  }
 }
 ```
 
@@ -213,8 +228,8 @@ OriginalPost(
 Все настройки парсера управляются через `app/config.py`:
 
 ```python
-# Apify
-APIFY_API_KEY: str  # API ключ
+# ScrapeCreators
+SCRAPECREATORS_API_KEY: str  # API ключ
 
 # Instagram
 INSTAGRAM_AUTHORS: str  # Список авторов через запятую
@@ -228,33 +243,28 @@ MIN_TEXT_LENGTH: int = 100  # Минимальная длина текста
 Парсер логирует все операции:
 
 ```
-2026-01-30 10:15:23 | INFO     | instagram_parser:parse_accounts:67 - Starting Instagram parsing for 5 accounts
-2026-01-30 10:15:25 | INFO     | instagram_parser:_start_apify_run:123 - Apify run started: abc123def456
-2026-01-30 10:15:30 | DEBUG    | instagram_parser:_wait_for_run:158 - Apify run abc123def456 status: RUNNING
-2026-01-30 10:15:45 | INFO     | instagram_parser:_wait_for_run:163 - Apify run abc123def456 succeeded
-2026-01-30 10:15:46 | INFO     | instagram_parser:parse_accounts:82 - Fetched 47 posts from Apify
-2026-01-30 10:15:46 | INFO     | instagram_parser:parse_accounts:92 - Filtered to 8 viral posts
-2026-01-30 10:15:47 | INFO     | instagram_parser:save_to_db:298 - Saved post ABC123 from @sanyaagainst
-2026-01-30 10:15:47 | INFO     | instagram_parser:save_to_db:314 - Saved 8 new posts to database
+2026-01-30 10:15:23 | INFO     | Starting Instagram parsing for 5 accounts
+2026-01-30 10:15:25 | INFO     | Fetched 12 posts from @sanyaagainst
+2026-01-30 10:15:28 | INFO     | Fetched 10 posts from @theivansergeev
+2026-01-30 10:15:30 | INFO     | Fetched 47 posts from ScrapeCreators
+2026-01-30 10:15:30 | INFO     | Filtered to 8 viral posts
+2026-01-30 10:15:31 | INFO     | Saved post ABC123 from @sanyaagainst
+2026-01-30 10:15:31 | INFO     | Saved 8 new posts to database
 ```
 
 ## 🛡️ Error Handling
 
 Парсер обрабатывает все типы ошибок:
 
-1. **Timeout ошибки** - если Apify run не завершился за 5 минут
-2. **HTTP ошибки** - если Apify API недоступен
-3. **Дубликаты** - если пост уже есть в БД (по `external_id`)
-4. **Некорректные данные** - если пост не содержит обязательных полей
-5. **Database ошибки** - откат транзакции при ошибке сохранения
+1. **HTTP ошибки** - если ScrapeCreators API недоступен
+2. **Дубликаты** - если пост уже есть в БД (по `external_id`)
+3. **Некорректные данные** - если пост не содержит обязательных полей
+4. **Database ошибки** - откат транзакции при ошибке сохранения
 
 ## 📈 Производительность
 
-- **Скорость парсинга**: ~10-30 секунд на аккаунт (зависит от Apify)
-- **Лимиты Apify**: 
-  - Бесплатный план: $5 кредитов (~1000 запросов)
-  - Один запрос = ~$0.005
-  - Можно парсить ~200 аккаунтов в месяц бесплатно
+- **Скорость парсинга**: ~1-3 секунды на аккаунт (прямой API запрос)
+- **Лимиты ScrapeCreators**: 100 бесплатных запросов при регистрации
 - **Рекомендуемая частота**: каждые 6 часов (4 раза в день)
 
 ## 🔄 Следующие шаги
@@ -269,20 +279,20 @@ MIN_TEXT_LENGTH: int = 100  # Минимальная длина текста
 
 ## 🐛 Troubleshooting
 
-### Ошибка: "APIFY_API_KEY not found"
+### Ошибка: "SCRAPECREATORS_API_KEY not found"
 
 Убедитесь, что в `.env` файле есть:
 
 ```env
-APIFY_API_KEY=your_actual_api_key_here
+SCRAPECREATORS_API_KEY=your_actual_api_key_here
 ```
 
-### Ошибка: "Apify run failed with status: FAILED"
+### Ошибка: "API error" (success: false)
 
 Возможные причины:
 - Неверный API ключ
-- Закончились кредиты Apify
-- Аккаунт Instagram заблокирован или приватный
+- Закончились бесплатные запросы
+- Аккаунт Instagram приватный или заблокирован
 
 ### Ошибка: "No viral posts found"
 
@@ -300,8 +310,7 @@ MAX_POST_AGE_DAYS=7
 
 ## 📚 Полезные ссылки
 
-- [Apify Instagram Scraper](https://apify.com/apify/instagram-scraper)
-- [Apify API Documentation](https://docs.apify.com/api/v2)
+- [ScrapeCreators](https://scrapecreators.com)
 - [SQLAlchemy Async](https://docs.sqlalchemy.org/en/20/orm/extensions/asyncio.html)
 - [Loguru Documentation](https://loguru.readthedocs.io/)
 
@@ -311,4 +320,4 @@ MAX_POST_AGE_DAYS=7
 
 **Дата создания:** 2026-01-30
 
-**Версия:** 1.0.0
+**Версия:** 2.0.0 (ScrapeCreators)

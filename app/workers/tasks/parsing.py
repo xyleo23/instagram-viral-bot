@@ -82,9 +82,6 @@ async def parse_instagram_accounts(self) -> Dict:
         
         # Retry с экспоненциальным backoff
         raise self.retry(exc=e)
-        
-    finally:
-        await parser.close()
 
 
 @celery_app.task(
@@ -138,6 +135,3 @@ async def parse_specific_account(self, username: str) -> Dict:
     except Exception as e:
         logger.error(f"Error parsing @{username}: {e}")
         raise self.retry(exc=e)
-        
-    finally:
-        await parser.close()

@@ -92,20 +92,20 @@ class InstagramParser:
                 if not data.get("success"):
                     raise Exception(f"API error: {data}")
 
-                # Извлечь посты из edge_felix_video_timeline (видео)
+                # Извлечь посты (приоритет: видео, fallback: все посты)
                 posts_data = (
                     data.get("data", {})
                     .get("edge_felix_video_timeline", {})
                     .get("edges", [])
                 )
 
-                # Дополнительно: edge_owner_to_timeline_media (фото + видео)
                 if not posts_data:
                     posts_data = (
                         data.get("data", {})
                         .get("edge_owner_to_timeline_media", {})
                         .get("edges", [])
                     )
+                    logger.info(f"Using timeline media instead of videos for @{username}")
 
                 posts = []
                 for edge in posts_data[:limit]:

@@ -58,9 +58,13 @@ class Config(BaseSettings):
         default="",
         description="Yandex.Disk OAuth Token",
     )
-    SCRAPECREATORS_API_KEY: str = Field(
+    INSTAGRAM_PARSER_USERNAME: str = Field(
         ...,
-        description="ScrapeCreators API Key for Instagram parsing",
+        description="Instagram login for Instaloader parser",
+    )
+    INSTAGRAM_PARSER_PASSWORD: str = Field(
+        ...,
+        description="Instagram password for Instaloader parser",
     )
 
     # ==================== INSTAGRAM PUBLISHING ====================

@@ -1,10 +1,11 @@
 """
-Сервис парсинга Instagram через ScrapeCreators API.
+Сервис парсинга Instagram через Instaloader.
 """
+import instaloader
 import asyncio
-from typing import List, Dict, Optional, Any, Tuple
+import time
 from datetime import datetime, timedelta
-import aiohttp
+from typing import List, Dict, Optional, Any, Tuple
 from loguru import logger
 
 from app.config import get_config, Config
@@ -14,153 +15,138 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 
+def _fetch_profile_posts_sync(context, username: str, limit: int) -> List[Dict[str, Any]]:
+    """Синхронно получает посты профиля (для запуска в executor)."""
+    clean_username = username.replace("@", "").strip()
+    profile = instaloader.Profile.from_username(context, clean_username)
+    posts = []
+    for i, post in enumerate(profile.get_posts()):
+        if len(posts) >= limit:
+            break
+        if i > 0:
+            time.sleep(3)
+        is_carousel = getattr(post, "typename", None) == "GraphSidecar"
+        carousel_count = 0
+        if is_carousel:
+            try:
+                carousel_count = len(list(post.get_sidecar_nodes()))
+            except Exception:
+                pass
+        timestamp_iso = post.date_utc.strftime("%Y-%m-%dT%H:%M:%S+00:00") if post.date_utc else datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")
+        post_data = {
+            "id": post.shortcode,
+            "shortCode": post.shortcode,
+            "ownerUsername": clean_username,
+            "caption": (post.caption or "") or "",
+            "likesCount": post.likes,
+            "commentsCount": post.comments,
+            "timestamp": timestamp_iso,
+            "url": f"https://www.instagram.com/p/{post.shortcode}/",
+            "is_video": getattr(post, "is_video", False),
+            "display_url": getattr(post, "url", None) or (post.url if hasattr(post, "url") else None),
+            "video_url": getattr(post, "video_url", None) if getattr(post, "is_video", False) else None,
+        }
+        posts.append(post_data)
+    return posts
+
+
 class InstagramParser:
-    """Сервис парсинга Instagram через ScrapeCreators API."""
+    """Сервис парсинга Instagram через Instaloader."""
 
     def __init__(self, settings: Optional[Config] = None):
-        """
-        Инициализация парсера.
-
-        Args:
-            settings: Конфигурация (если None — используется get_config()).
-        """
         self.settings = settings or get_config()
+        self.loader = instaloader.Instaloader(
+            download_videos=False,
+            download_video_thumbnails=False,
+            download_geotags=False,
+            download_comments=False,
+            save_metadata=False,
+            compress_json=False,
+            post_metadata_txt_pattern="",
+        )
+        self._logged_in = False
+
+    async def login(self) -> None:
+        """Логин в Instagram через Instaloader."""
+        if self._logged_in:
+            return
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(
+                None,
+                self.loader.login,
+                self.settings.INSTAGRAM_PARSER_USERNAME,
+                self.settings.INSTAGRAM_PARSER_PASSWORD,
+            )
+            self._logged_in = True
+            logger.info("Successfully logged in to Instagram")
+        except Exception as e:
+            logger.error(f"Failed to login to Instagram: {e}")
+            raise
+
+    async def close(self) -> None:
+        """Закрытие парсера (no-op для Instaloader)."""
+        pass
 
     async def parse_accounts(
         self,
         accounts: List[str],
         min_likes: Optional[int] = None,
         max_age_days: Optional[int] = None,
-        posts_limit: int = 10
+        posts_limit: int = 10,
     ) -> List[Dict[str, Any]]:
-        """
-        Парсит Instagram аккаунты через ScrapeCreators API.
+        """Парсит Instagram аккаунты через Instaloader."""
+        await self.login()
+        all_posts = []
+        for username in accounts:
+            try:
+                clean_username = (username or "").strip().lstrip("@")
+                if not clean_username:
+                    continue
+                if clean_username.startswith("http://") or clean_username.startswith("https://"):
+                    clean_username = clean_username.rstrip("/").split("/")[-1] or clean_username
+                posts = await self._fetch_profile_posts(clean_username, posts_limit)
+                all_posts.extend(posts)
+            except Exception as e:
+                logger.error(f"Error parsing @{username}: {e}")
 
-        Args:
-            accounts: Список username'ов или URL для парсинга
-            min_likes: Минимум лайков для фильтра (None — из config/.env)
-            max_age_days: Максимальный возраст поста (None — из config/.env)
-            posts_limit: Сколько постов парсить с каждого аккаунта
+        logger.info(f"Fetched {len(all_posts)} posts from Instaloader")
 
-        Returns:
-            Список постов в формате dict
-        """
-        logger.info(f"Starting Instagram parsing for {len(accounts)} accounts")
+        min_likes_val = min_likes if min_likes is not None else getattr(self.settings, "MIN_LIKES", 5000)
+        max_age_val = max_age_days if max_age_days is not None else getattr(self.settings, "MAX_POST_AGE_DAYS", 3)
+        min_text = getattr(self.settings, "MIN_TEXT_LENGTH", 100)
 
-        try:
-            all_posts = []
-            for username in accounts:
-                try:
-                    clean_username = (username or "").strip().lstrip("@")
-                    if not clean_username:
-                        continue
-                    if clean_username.startswith("http://") or clean_username.startswith("https://"):
-                        clean_username = clean_username.rstrip("/").split("/")[-1] or clean_username
-                    posts = await self._fetch_profile_posts(clean_username, posts_limit)
-                    all_posts.extend(posts)
-                except Exception as e:
-                    logger.error(f"Error parsing @{username}: {e}")
+        viral_posts = self.filter_viral_posts(
+            all_posts,
+            min_likes=min_likes_val,
+            max_age_days=max_age_val,
+            min_text_length=min_text,
+        )
+        logger.info(f"Filtered to {len(viral_posts)} viral posts")
+        return viral_posts
 
-            logger.info(f"Fetched {len(all_posts)} posts from ScrapeCreators")
-
-            filtered = self.filter_viral_posts(
-                all_posts,
-                min_text_length=getattr(self.settings, "MIN_TEXT_LENGTH", 100),
-                max_age_days=max_age_days if max_age_days is not None else getattr(self.settings, "MAX_POST_AGE_DAYS", 3),
-                min_likes=min_likes if min_likes is not None else getattr(self.settings, "MIN_LIKES", 5000)
-            )
-            logger.info(f"Filtered to {len(filtered)} viral posts")
-            return filtered
-
-        except Exception as e:
-            logger.error(f"Error parsing Instagram: {e}")
-            raise
-
-    async def _fetch_profile_posts(
-        self, username: str, limit: int = 5
-    ) -> List[Dict[str, Any]]:
-        """Получить посты профиля через ScrapeCreators."""
-        url = "https://api.scrapecreators.com/v1/instagram/profile"
-        headers = {"x-api-key": self.settings.SCRAPECREATORS_API_KEY}
-        params = {"handle": username.replace("@", "")}
-
-        async with aiohttp.ClientSession() as session:
-            async with session.get(url, headers=headers, params=params, timeout=30) as resp:
-                resp.raise_for_status()
-                data = await resp.json()
-
-                if not data.get("success"):
-                    raise Exception(f"API error: {data}")
-
-                # Извлечь посты (приоритет: видео, fallback: все посты)
-                posts_data = (
-                    data.get("data", {})
-                    .get("edge_felix_video_timeline", {})
-                    .get("edges", [])
-                )
-
-                if not posts_data:
-                    posts_data = (
-                        data.get("data", {})
-                        .get("edge_owner_to_timeline_media", {})
-                        .get("edges", [])
-                    )
-                    logger.info(f"Using timeline media instead of videos for @{username}")
-
-                posts = []
-                for edge in posts_data[:limit]:
-                    node = edge.get("node", {})
-
-                    # Извлечь caption
-                    caption_edges = node.get("edge_media_to_caption", {}).get("edges", [])
-                    if caption_edges:
-                        caption = caption_edges[0].get("node", {}).get("text", "")
-                    else:
-                        caption = ""
-
-                    shortcode = node.get("shortcode") or node.get("id", "")
-                    taken_at = node.get("taken_at_timestamp")
-                    if taken_at:
-                        timestamp_str = datetime.utcfromtimestamp(taken_at).strftime("%Y-%m-%dT%H:%M:%S+00:00")
-                    else:
-                        timestamp_str = datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%S+00:00")
-
-                    post = {
-                        "id": shortcode,
-                        "shortCode": shortcode,
-                        "ownerUsername": username,
-                        "caption": caption,
-                        "likesCount": node.get("edge_liked_by", {}).get("count", 0),
-                        "commentsCount": node.get("edge_media_to_comment", {}).get("count", 0),
-                        "timestamp": timestamp_str,
-                        "url": f"https://www.instagram.com/p/{shortcode}/",
-                        "is_video": node.get("is_video", False),
-                        "display_url": node.get("display_url"),
-                        "video_url": node.get("video_url") if node.get("is_video") else None,
-                    }
-                    posts.append(post)
-
-                logger.info(f"Fetched {len(posts)} posts from @{username}")
-                return posts
+    async def _fetch_profile_posts(self, username: str, limit: int = 5) -> List[Dict[str, Any]]:
+        """Получить посты профиля через Instaloader."""
+        loop = asyncio.get_event_loop()
+        posts = await loop.run_in_executor(
+            None,
+            _fetch_profile_posts_sync,
+            self.loader.context,
+            username.replace("@", "").strip(),
+            limit,
+        )
+        logger.info(f"Fetched {len(posts)} posts from @{username}")
+        return posts
 
     def filter_viral_posts(
         self,
         posts: List[Dict[str, Any]],
         min_likes: int = 5000,
         max_age_days: int = 3,
-        min_text_length: int = 100
+        min_text_length: int = 100,
     ) -> List[Dict[str, Any]]:
         """
         Фильтрует только вирусные посты.
-
-        Args:
-            posts: Список постов
-            min_likes: Минимум лайков
-            max_age_days: Максимальный возраст
-            min_text_length: Минимальная длина текста
-
-        Returns:
-            Отфильтрованные посты, отсортированные по лайкам
         """
         filtered = []
         cutoff_date = datetime.utcnow() - timedelta(days=max_age_days)
@@ -295,8 +281,8 @@ class InstagramParser:
     ) -> List[Dict[str, Any]]:
         """
         Парсит только активных авторов из AuthorManager с персональными настройками.
-        Если активных авторов нет — использует config (instagram_authors_list, MIN_LIKES, MAX_POST_AGE_DAYS).
         """
+        await self.login()
         authors = await AuthorManager.get_active_authors()
         config = get_config()
         if not authors:
@@ -327,7 +313,7 @@ class InstagramParser:
             except Exception as e:
                 logger.error(f"Error parsing @{username}: {e}")
 
-        logger.info(f"Fetched {len(all_posts)} posts from ScrapeCreators")
+        logger.info(f"Fetched {len(all_posts)} posts from Instaloader")
 
         filtered = self.filter_viral_posts_per_author(
             all_posts,
@@ -340,17 +326,10 @@ class InstagramParser:
     async def save_to_db(
         self,
         posts: List[Dict[str, Any]],
-        status: PostStatus = PostStatus.FILTERED
+        status: PostStatus = PostStatus.FILTERED,
     ) -> List[OriginalPost]:
         """
         Сохраняет посты в БД.
-
-        Args:
-            posts: Список постов
-            status: Начальный статус
-
-        Returns:
-            Список сохраненных моделей
         """
         saved_posts = []
 
@@ -387,7 +366,7 @@ class InstagramParser:
                         engagement=0.0,
                         post_url=post_data.get("url", f"https://www.instagram.com/p/{external_id}/"),
                         posted_at=posted_at,
-                        status=status
+                        status=status,
                     )
 
                     session.add(new_post)
@@ -423,23 +402,20 @@ async def main():
             accounts=config.instagram_authors_list[:3],
             min_likes=config.MIN_LIKES,
             max_age_days=config.MAX_POST_AGE_DAYS,
-            posts_limit=5
+            posts_limit=5,
         )
 
         print(f"\n✅ Found {len(posts)} viral posts")
 
-        saved = await parser.save_to_db(posts)
-        print(f"💾 Saved {len(saved)} posts to database")
-
-        for post in saved[:3]:
-            print(f"\n📝 @{post.author}: {post.likes} likes")
-            print(f"   {post.text[:100]}...")
-
+        for post in posts[:3]:
+            print(f"\n📝 @{post.get('ownerUsername')}: {post.get('likesCount')} likes")
+            print(f"   {(post.get('caption') or '')[:100]}...")
     finally:
-        pass
+        await parser.close()
 
 
 if __name__ == "__main__":
     from app.utils.logger import setup_logger
+
     setup_logger()
     asyncio.run(main())

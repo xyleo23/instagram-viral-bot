@@ -1,6 +1,7 @@
 """
 Сервис парсинга Instagram через Instaloader.
 """
+import os
 import instaloader
 import asyncio
 import time
@@ -8,7 +9,16 @@ from datetime import datetime, timedelta
 from typing import List, Dict, Optional, Any, Tuple
 from loguru import logger
 
+from instaloader.instaloadercontext import RateController
+
 from app.config import get_config, Config
+
+
+class _NoOpRateController(RateController):
+    """RateController без задержек — используем свою паузу в _fetch_profile_posts_sync."""
+
+    def sleep(self, secs: float) -> None:
+        pass
 from app.models import OriginalPost, PostStatus, get_session
 from app.services.author_manager import AuthorManager
 from sqlalchemy import select
@@ -24,7 +34,7 @@ def _fetch_profile_posts_sync(context, username: str, limit: int) -> List[Dict[s
         if len(posts) >= limit:
             break
         if i > 0:
-            time.sleep(3)
+            time.sleep(5)  # Задержка между запросами (анти-бан)
         is_carousel = getattr(post, "typename", None) == "GraphSidecar"
         carousel_count = 0
         if is_carousel:
@@ -63,26 +73,60 @@ class InstagramParser:
             save_metadata=False,
             compress_json=False,
             post_metadata_txt_pattern="",
+            max_connection_attempts=3,
+            request_timeout=60,
+            rate_controller=lambda ctx: _NoOpRateController(ctx),
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         )
         self._logged_in = False
 
     async def login(self) -> None:
-        """Логин в Instagram через Instaloader."""
+        """Логин в Instagram: сначала загрузка сессии из файла, при неудаче — логин по паролю с сохранением сессии."""
         if self._logged_in:
             return
-        try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(
-                None,
-                self.loader.login,
-                self.settings.INSTAGRAM_PARSER_USERNAME,
-                self.settings.INSTAGRAM_PARSER_PASSWORD,
-            )
-            self._logged_in = True
-            logger.info("Successfully logged in to Instagram")
-        except Exception as e:
-            logger.error(f"Failed to login to Instagram: {e}")
-            raise
+
+        session_file = "/app/instagram_session"
+        loop = asyncio.get_event_loop()
+        session_loaded = False
+
+        # Загрузка сессии из файла ПЕРЕД попыткой логина с паролем
+        if os.path.exists(session_file):
+            try:
+                await loop.run_in_executor(
+                    None,
+                    lambda: self.loader.load_session_from_file(
+                        self.settings.INSTAGRAM_PARSER_USERNAME,
+                        session_file,
+                    ),
+                )
+                logger.info(
+                    "Loaded Instagram session from file for {}", self.settings.INSTAGRAM_PARSER_USERNAME
+                )
+                session_loaded = True
+            except Exception as e:
+                logger.warning("Session file invalid or load failed: {}", e)
+
+        # Логин по паролю только если файл сессии не найден или невалиден
+        if not session_loaded:
+            try:
+                await loop.run_in_executor(
+                    None,
+                    lambda: self.loader.login(
+                        self.settings.INSTAGRAM_PARSER_USERNAME,
+                        self.settings.INSTAGRAM_PARSER_PASSWORD,
+                    ),
+                )
+                os.makedirs(os.path.dirname(session_file), exist_ok=True)
+                await loop.run_in_executor(
+                    None,
+                    lambda: self.loader.save_session_to_file(session_file),
+                )
+                logger.info("Logged in and saved session")
+            except Exception as e:
+                logger.error("Failed to login: {}", e)
+                raise
+
+        self._logged_in = True
 
     async def close(self) -> None:
         """Закрытие парсера (no-op для Instaloader)."""
